@@ -1,0 +1,164 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Hugging Face SOC Incident Analyst Reference</title>
+<style>
+:root{--ink:#172432;--muted:#566270;--line:#d6dde4;--navy:#26384a;--pale:#f2f6f9}body{margin:0;background:#f5f7f9;color:var(--ink);font:16px/1.55 Aptos,Arial,sans-serif}main{max-width:1000px;margin:32px auto;padding:46px 58px;background:#fff;box-shadow:0 2px 12px #1b2b3b18}h1,h2,h3{line-height:1.2;color:#000}h1{font-size:2.25rem;margin:0 0 .15rem}h2{margin-top:2.3rem;font-size:1.55rem}h3{margin-top:1.7rem;font-size:1.2rem}.subtitle{margin:0 0 1.7rem;font-weight:700}table{width:100%;border-collapse:collapse;margin:1rem 0 1.25rem;font-size:.9rem}th,td{border:1px solid var(--line);padding:.55rem .65rem;vertical-align:top;text-align:left}th{background:var(--navy);color:#fff}tr:nth-child(even) td{background:var(--pale)}code{font:.88em Consolas,monospace}pre{overflow:auto;padding:.9rem 1rem;background:#f3f5f7;border-left:4px solid var(--navy)}blockquote{margin:1rem 0;padding:.7rem 1rem;border-left:4px solid var(--navy);background:var(--pale)}li{margin:.2rem 0}@media print{body{background:#fff}main{margin:0;box-shadow:none;max-width:none}}@media(max-width:700px){main{margin:0;padding:28px 20px}h1{font-size:1.7rem}.table-wrap{overflow-x:auto}table{font-size:.8rem}}
+</style></head><body><main><h1>Hugging Face SOC Incident Analyst Reference</h1>
+<h2>Structured investigation writeup and operational cheat sheet</h2>
+<p>This reference converts the incident notes into an analyst-ready investigation narrative. The central lesson is simple: action volume does not equal impact. A defensible story emerges only after separating successful access from refused attempts and joining evidence across the agent trace, worker logs, malicious dataset configuration, C2 messages, captured environment data, and Kubernetes audit events.</p>
+<h2>Executive Summary</h2>
+<ul>
+<li>Initial access combined two local-data abuse paths: Jinja2 template injection produced code execution, while HDF5 external raw storage disclosed local files, including the pod environment and worker source.</li>
+<li>The URL allowlist passed because neither vector required a remote fetch. The control did not cover local template evaluation or file URI access.</li>
+<li>The attacker recovered a pod service-account token, enumerated Kubernetes permissions, created a privileged hostPath pod, and used node access to reach additional credentials and services.</li>
+<li>C2 was recoverable only by grouping chunks by both channel and message, verifying checksums, reversing base64 and repeating-key XOR, and then gunzipping each message independently.</li>
+<li>A shared service-connector credential and an EdDSA signing key expanded the blast radius. The signing key was an issuing capability, not merely another expiring token.</li>
+<li>The impact statement should include only confirmed successful access to named objects. Denied writes, dry-run probes, read-only reachability, and a blocked supply-chain attempt remain important control evidence, but not successful impact.</li>
+</ul>
+<h2>Evidence Model</h2>
+<div class="table-wrap"><table><thead><tr><th>Source</th><th>What it proves</th><th>Primary joins</th></tr></thead><tbody>
+<tr><td><code>agent-trace.json</code></td><td>Activity sequence, phase and action labels, result, command, cross-source references</td><td>timestamp, action ID, refs, dataset revision, audit ID, C2 message</td></tr>
+<tr><td><code>malicious-dataset.yaml</code></td><td>Initial-access mechanisms and attacker-controlled fields</td><td>dataset revision, local paths, payload</td></tr>
+<tr><td><code>dataset-worker.log</code></td><td>Template evaluation, child process creation, HDF5 reads, allowlist verdict</td><td>timestamp, worker pod, dataset revision</td></tr>
+<tr><td><code>c2-messages.json</code></td><td>Commands, dead drops, and exfiltrated payloads after decoding</td><td>channel, msg, sequence, checksum</td></tr>
+<tr><td><code>environment.h5</code></td><td>Leaked environment data, campaign XOR key, connector hostname and IP</td><td><code>EXPLOITGYM_C2_KEY</code>, <code>SERVICE_CONNECTOR</code></td></tr>
+<tr><td><code>kubernetes-audit.json</code></td><td>Cluster-side proof of authenticated, authorized, admitted, refused, or dry-run activity</td><td>timestamp, auditID, user, URI, status code</td></tr>
+</tbody></table></div>
+<p><strong>Analyst rule:</strong> Decoded C2 shows intent; the owning-system log demonstrates whether an action happened. Repeated identifiers turn a plausible chain into a defensible finding.</p>
+<h2>Investigation Narrative</h2>
+<h3>1. Triage the Campaign Shape</h3>
+<p>The 279-action reconstruction is dominated by reconnaissance and dropper activity. Together they account for 203 actions, while five exfiltration events represent less than two percent of the trace. Start with distributions to understand where noise is concentrated, then pivot to outcomes.</p>
+<div class="table-wrap"><table><thead><tr><th>Action type</th><th>Count</th><th>Interpretation</th></tr></thead><tbody>
+<tr><td>recon</td><td>122</td><td>Discovery and reading</td></tr>
+<tr><td>dropper</td><td>81</td><td>Execution and staging</td></tr>
+<tr><td>c2</td><td>33</td><td>Command channels</td></tr>
+<tr><td>secret</td><td>16</td><td>Credential access</td></tr>
+<tr><td>cloud</td><td>10</td><td>Cloud enumeration or permission testing</td></tr>
+<tr><td>k8s</td><td>10</td><td>Cluster activity</td></tr>
+<tr><td>exfil</td><td>5</td><td>Confirmed exfiltration actions</td></tr>
+<tr><td>pivot</td><td>1</td><td>Lateral movement</td></tr>
+<tr><td>source_control</td><td>1</td><td>Blocked supply-chain attempt</td></tr>
+</tbody></table></div>
+<pre><code>jq -r &#x27;group_by(.action_type)[] | &quot;\(.[0].action_type) \(length)&quot;&#x27; /opt/incident/agent-trace.json
+jq -r &#x27;group_by(.phase)[] | &quot;\(.[0].phase) \(length)&quot;&#x27; /opt/incident/agent-trace.json</code></pre>
+<p><strong>Caveat:</strong> <code>action_type</code> and <code>phase</code> are reconstruction labels. Production telemetry normally requires analysts to derive equivalent stages from raw process, application, cloud, HTTP, and audit records.</p>
+<h3>2. Establish Initial Access</h3>
+<p>The earliest dropper timestamp marks the first observed code execution. The malicious dataset configuration explains how execution occurred and why the existing control missed it.</p>
+<div class="table-wrap"><table><thead><tr><th>Vector</th><th>Mechanism</th><th>Outcome</th></tr></thead><tbody>
+<tr><td>Jinja2 offset injection</td><td>An fsspec reference offset expected to be an integer was rendered as attacker-controlled Jinja2 that reached Python builtins and invoked <code>exec</code>.</td><td>Remote command execution in the worker process</td></tr>
+<tr><td>HDF5 external raw storage</td><td>External storage targets pointed to local file URIs such as <code>/proc/self/environ</code> and worker source paths.</td><td>Local file disclosure, including credentials and implementation detail</td></tr>
+</tbody></table></div>
+<div class="table-wrap"><table><thead><tr><th>Pattern</th><th>Normal</th><th>Suspicious</th></tr></thead><tbody>
+<tr><td>reference offset</td><td>Integer byte position</td><td>Jinja2 expression reaching Python builtins and <code>exec</code></td></tr>
+<tr><td>HDF5 raw target</td><td>Expected approved location</td><td><code>file:///proc/self/environ</code> or application source</td></tr>
+<tr><td>worker process tree</td><td>Worker with no unexpected children</td><td>Child shell or curl-to-shell process</td></tr>
+<tr><td>allowlist result</td><td>Pass after evaluated remote fetches</td><td>Pass because no remote fetch occurred</td></tr>
+</tbody></table></div>
+<p>Sequence matters: worker warnings for template evaluation and child process creation precede the HDF5 reads by seconds. Treat the file reads as a consequence of execution, not as proof that HDF5 itself executed code.</p>
+<h3>3. Decode and Interpret C2</h3>
+<p>Each C2 record is only an encoded fragment. The encoder compressed each message, XORed it with a repeating 32-byte campaign key, split the bytes into chunks, and base64-encoded each chunk. Reverse those operations per message.</p>
+<ol>
+<li>Recover <code>EXPLOITGYM_C2_KEY</code> from the captured environment and convert its 64 hexadecimal characters into 32 raw bytes.</li>
+<li>Group records by the pair <code>(channel, msg)</code>. Never group by channel alone.</li>
+<li>Sort each group by <code>sequence</code>.</li>
+<li>Base64-decode each body and validate the truncated SHA-256 checksum of the raw chunk.</li>
+<li>Concatenate decoded chunks, XOR the full blob with the repeating key, then gunzip.</li>
+<li>Treat type counts as one vote per message, not per envelope.</li>
+</ol>
+<pre><code>groups[(e[&#x27;channel&#x27;], e[&#x27;msg&#x27;])].append(e)
+blob = b&#x27;&#x27;.join(base64.b64decode(e[&#x27;body&#x27;]) for e in sorted(envs, key=lambda x: x[&#x27;sequence&#x27;]))
+plaintext = gzip.decompress(xor(blob, key)).decode()</code></pre>
+<p>Decoded commands show token discovery, token reading, Kubernetes API enumeration, authorization checks, and application of a privileged pod manifest. The exfil channel contains 17 messages: ten JWTs, three tokens, two AWS keys, one EdDSA private key, and one lab flag. Exclude the flag from credential counts.</p>
+<h3>4. Prove Kubernetes Escalation</h3>
+<p>Kubernetes accepted the malicious pod through normal authentication, authorization, and admission. The exploit was not an API-server vulnerability: the workload identity had excessive pod-creation authority, and no admission policy rejected a privileged hostPath specification.</p>
+<div class="table-wrap"><table><thead><tr><th>Evidence</th><th>Meaning</th></tr></thead><tbody>
+<tr><td>Projected service-account token read from the pod</td><td>Code execution became possession of a valid cluster credential</td></tr>
+<tr><td>Permission enumeration followed by privileged pod creation</td><td>The actor confirmed authority before using it</td></tr>
+<tr><td>Privileged container plus hostPath mount</td><td>Container root crossed into node filesystem access</td></tr>
+<tr><td>ClusterRoleBinding write six minutes later</td><td>Node-level access became durable or broader cluster authority</td></tr>
+<tr><td>Audit status 200</td><td>The cluster accepted the operation; this is outcome evidence</td></tr>
+</tbody></table></div>
+<p>Detection focus: unexpected service-account use, cross-namespace or cluster-scoped access, privileged security contexts, hostPath mounts, service-account token reads, ClusterRoleBinding changes, and abrupt identity changes within one timeline.</p>
+<h3>5. Follow Node and Cloud Credentials</h3>
+<p>A privileged pod can reach the node filesystem and, depending on network and metadata protections, the cloud instance metadata service. Node-role credentials can then be used to construct an aws-iam-authenticator style <code>k8s-aws-v1</code> bearer if the IAM role is mapped into cluster authentication.</p>
+<div class="table-wrap"><table><thead><tr><th>Pattern</th><th>Expected baseline</th><th>High-signal condition</th></tr></thead><tbody>
+<tr><td>Pod to <code>169.254.169.254</code></td><td>Absent where workloads have their own identity</td><td>Any <code>iam/security-credentials</code> request from an application pod</td></tr>
+<tr><td>Metadata request</td><td>IMDSv2 token flow where required</td><td>Bare GET returning credentials</td></tr>
+<tr><td>Node-role holder</td><td>Kubelet and approved node agents</td><td>Application-container process</td></tr>
+<tr><td><code>k8s-aws-v1</code> bearer</td><td>Mapped operators or CI roles</td><td>Bearer built from node credentials inside a pod</td></tr>
+<tr><td>Dry-run mutation</td><td>Approved CI or GitOps planning</td><td>Workload identity probing cluster-scoped infrastructure</td></tr>
+</tbody></table></div>
+<p>Dry-run activity can reveal whether a credential would be authorized. In production, parse <code>dryRun=All</code> from <code>requestURI</code> and evaluate the identity, target, timing, and normal change workflow; dry-run alone is common background activity.</p>
+<h3>6. Analyze the Service Connector Pivot</h3>
+<p>Two accepted writes to cluster role bindings reveal two identities: the compromised datasets worker and later <code>service-connector</code>. The second identity used a single shared credential, creating a fleet-wide trust problem. A ClusterRoleBinding cannot literally add an identity to <code>system:masters</code>; it can grant equivalent <code>cluster-admin</code> privilege. Establish whether group membership came from the authenticator or whether a binding granted equivalent privilege before selecting remediation.</p>
+<div class="table-wrap"><table><thead><tr><th>Time</th><th>Identity</th><th>Operation</th><th>Result</th></tr></thead><tbody>
+<tr><td>2026-07-11 19:59 UTC</td><td>datasets-worker service account</td><td>Cluster role binding authorization path</td><td>200 accepted</td></tr>
+<tr><td>2026-07-11 22:43 UTC</td><td>service-connector</td><td>Create cluster-scoped permission binding</td><td>200 accepted</td></tr>
+<tr><td>2026-07-11 22:45 UTC</td><td>service-connector</td><td>Dry-run machinepool creation</td><td>Validated, not persisted</td></tr>
+</tbody></table></div>
+<p>The leaked environment exposed <code>SERVICE_CONNECTOR=svc-connector.internal.hf.thm</code> and its internal IP early in the intrusion. Environment variables therefore supplied both credentials and a service map.</p>
+<h3>7. Separate Tokens from Signing Authority</h3>
+<p>Ten exfiltrated JWTs are expiring bearer artifacts. The exfiltrated EdDSA private key is more dangerous because it can mint cryptographically valid JWTs for arbitrary subjects, audiences, and expirations until trust is rotated. Containment must withdraw the public key or otherwise retire the key pair; waiting for existing tokens to expire is insufficient.</p>
+<h3>8. State Impact by Outcome</h3>
+<div class="table-wrap"><table><thead><tr><th>Bucket</th><th>Required evidence</th><th>Reporting treatment</th></tr></thead><tbody>
+<tr><td>Accessed</td><td>Completed action tied to a specific named object and corroborated by the owning system</td><td>Include in the impact statement</td></tr>
+<tr><td>Attempted and refused</td><td>Authenticated and evaluated request with a refusal such as HTTP 403</td><td>Report as attempted activity and a control success</td></tr>
+<tr><td>Reached but read-only</td><td>Successful connection or reads with write attempts denied</td><td>Report exposure and verified absence of modification</td></tr>
+<tr><td>Dry-run or preflight</td><td>Authorization or validation performed without persistence</td><td>Report capability testing, not a change</td></tr>
+</tbody></table></div>
+<p>The source-control attempt was blocked by execution policies. The actor could open a malicious pull request but could not make the pipeline execute its payload, and no unauthorized code shipped. Preserve both platform refusal and attacker-side trace as corroboration of the negative finding.</p>
+<h2>Analyst Cheat Sheet</h2>
+<h3>Fast Investigation Flow</h3>
+<ol>
+<li>Count action types and phases to understand campaign shape.</li>
+<li>Find the earliest successful execution-oriented action, not merely the earliest reconnaissance event.</li>
+<li>Inspect the implicated configuration and worker logs in timestamp order.</li>
+<li>Join sources on dataset revision, pod name, timestamp, audit ID, C2 channel/message, and recovered keys.</li>
+<li>Decode C2 per channel-message pair and verify every chunk checksum.</li>
+<li>Pivot decoded commands into Kubernetes audit evidence and owning-system logs.</li>
+<li>Trace identity transitions: pod token to privileged pod to node role to connector credential or signing key.</li>
+<li>Separate accessed, refused, read-only, and dry-run outcomes before writing impact.</li>
+</ol>
+<h3>High Value Queries</h3>
+<div class="table-wrap"><table><thead><tr><th>Goal</th><th>Command</th></tr></thead><tbody>
+<tr><td>Count action types</td><td>`jq -r &#x27;group_by(.action_type)[]</td><td>&quot;\(.[0].action_type) \(length)&quot;&#x27; agent-trace.json`</td></tr>
+<tr><td>Count phases</td><td>`jq -r &#x27;group_by(.phase)[]</td><td>&quot;\(.[0].phase) \(length)&quot;&#x27; agent-trace.json`</td></tr>
+<tr><td>First dropper</td><td>`jq -r &#x27;.[] \</td><td>select(.action_type==&quot;dropper&quot;) \</td><td>.ts&#x27; agent-trace.json \</td><td>sort \</td><td>head -1`</td></tr>
+<tr><td>Inspect C2 refs</td><td>`jq -c &#x27;.[] \</td><td>select(.action_type==&quot;c2&quot;) \</td><td>{ts,cmd,refs}&#x27; agent-trace.json`</td></tr>
+<tr><td>Find shared revision</td><td>`grep -rl &#x27;&lt;dataset_revision_hash&gt;&#x27; /opt/incident/ \</td><td>sort`</td></tr>
+<tr><td>Find environment key</td><td><code>grep -o &#x27;EXPLOITGYM_C2_KEY=[0-9a-f]*&#x27; environment.h5</code></td></tr>
+<tr><td>Find refused audit events</td><td>`jq -r &#x27;.[] \</td><td>select(.responseStatus.code==403) \</td><td>[.ts,.user.username,.verb,.requestURI] \</td><td>@tsv&#x27; kubernetes-audit.json`</td></tr>
+<tr><td>Find binding writes</td><td>`jq -r &#x27;.[] \</td><td>select(.requestURI \</td><td>test(&quot;clusterrolebindings&quot;)) \</td><td>[.ts,.auditID,.user.username,.verb,.responseStatus.code] \</td><td>@tsv&#x27; kubernetes-audit.json`</td></tr>
+<tr><td>List confirmed exfil</td><td>`jq -r &#x27;.[] \</td><td>select(.phase==&quot;exfil&quot; and .result==&quot;ok&quot;) \</td><td>[.ts,.action_id,.cmd] \</td><td>@tsv&#x27; agent-trace.json`</td></tr>
+</tbody></table></div>
+<h3>Decision Rules</h3>
+<div class="table-wrap"><table><thead><tr><th>Question</th><th>Rule</th></tr></thead><tbody>
+<tr><td>Did it execute?</td><td>Require process creation, worker warning, successful action result, or equivalent host evidence. A malicious field alone shows a payload, not execution.</td></tr>
+<tr><td>Did the cluster accept it?</td><td>Use Kubernetes response status and audit stage. Decoded commands alone show intent.</td></tr>
+<tr><td>Was data impacted?</td><td>Name the object and show a successful read or exfil outcome from the system that owns it.</td></tr>
+<tr><td>Did a write occur?</td><td>Separate 2xx persistence from 403 refusal and dry-run validation.</td></tr>
+<tr><td>Is a token enough to contain?</td><td>No when a signing key was stolen. Rotate the key pair and withdraw trust.</td></tr>
+<tr><td>Is volume severity?</td><td>No. Rank by successful outcomes, privilege gained, credential durability, and blast radius.</td></tr>
+</tbody></table></div>
+<h3>Common Analyst Traps</h3>
+<ul>
+<li>Grouping C2 by channel instead of by channel and message.</li>
+<li>Counting envelope fragments as separate credentials.</li>
+<li>Treating a passed URL allowlist as proof that no local abuse occurred.</li>
+<li>Calling HDF5 local-file disclosure the code-execution vector.</li>
+<li>Equating privileged pod admission with exploitation of the Kubernetes API server.</li>
+<li>Interpreting dry-run as benign without checking the caller and target.</li>
+<li>Reporting attempted writes as successful impact.</li>
+<li>Treating a stolen signing key as equivalent to a short-lived stolen JWT.</li>
+<li>Treating reconstruction-only fields such as <code>phase</code>, <code>note</code>, <code>bind</code>, or top-level <code>dryRun</code> as native production schema.</li>
+</ul>
+<h3>Impact Statement Template</h3>
+<blockquote>Confirmed impact: [identity] successfully accessed [specific objects] during [time window], supported by [owning-system evidence] and [corroborating source]. Attempted but unsuccessful activity included [actions], which were refused by [control and evidence]. We found [evidence-based statement about modification or persistence], with the following limitations: [telemetry gaps or reconstruction caveats].</blockquote>
+<h3>Production Fidelity Caveats</h3>
+<ul>
+<li>Phase and action labels in the trace were added during reconstruction; derive them in real telemetry.</li>
+<li>The bundle may expose responder annotations such as <code>note</code> and lift <code>dryRun</code> into a top-level field; production audit schema differs.</li>
+<li>A <code>bind</code> verb may represent authorization logic rather than the native audit request verb.</li>
+<li>One reconstructed audit stream cannot prove fleet-wide behavior; aggregate all relevant cluster streams.</li>
+<li>Negative findings require the correct owning-system logs and explicit coverage of the full incident window.</li>
+</ul></main></body></html>
