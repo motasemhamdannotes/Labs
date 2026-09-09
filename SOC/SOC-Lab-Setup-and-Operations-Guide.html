@@ -1,0 +1,1280 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>SOC Home Lab — Setup and Operations</title><style>:root{color-scheme:light;--ink:#162b3b;--muted:#506477;--accent:#087a80;--line:#d8e2e8}
+*{box-sizing:border-box}html{scroll-behavior:smooth;scroll-padding-top:28px}body{margin:0;background:#f3f6f8;color:var(--ink);font:16px/1.7 system-ui,-apple-system,"Segoe UI",sans-serif}
+aside{position:fixed;inset:0 auto 0 0;width:275px;padding:32px 23px;background:#102b3a;color:white;overflow:auto}aside strong{font-size:23px;display:block;line-height:1.2}aside small{display:block;color:#a8c5d0;margin:10px 0 22px}aside a{display:block;color:#d9e7ed;text-decoration:none;font-size:13px;padding:7px 0;line-height:1.4}aside a:hover{color:#74e0d4}
+main{max-width:1110px;margin-left:275px;padding:55px 58px 100px;background:white;min-height:100vh}h1{font-size:42px;line-height:1.15;letter-spacing:-1.3px;margin:0 0 24px}h2{font-size:28px;line-height:1.3;padding-top:34px;margin-top:42px;border-top:2px solid var(--line)}h3{font-size:20px;line-height:1.4;margin-top:34px}p{margin:16px 0}a{color:#086e84;text-underline-offset:3px}li{margin:7px 0}code{font:0.88em/1.6 Consolas,"Cascadia Code",monospace;background:#edf3f6;padding:2px 4px;border-radius:3px;overflow-wrap:anywhere}pre{background:#102b3a;color:#e1f0f3;padding:20px;border-radius:9px;overflow:auto;line-height:1.5}pre code{background:none;color:inherit;padding:0;white-space:pre;overflow-wrap:normal;font-size:13px}table{border-collapse:collapse;width:100%;font-size:13px;margin:24px 0;display:block;overflow:auto}th{text-align:left;background:#e4f1f3;color:#143e48}th,td{border:1px solid var(--line);padding:10px 12px;vertical-align:top}td code{font-size:12px}tr:nth-child(even){background:#f7f9fa}.tag{font-size:12px;font-weight:700;letter-spacing:2px;color:var(--accent);margin-bottom:18px}footer{border-top:1px solid var(--line);margin-top:50px;padding-top:20px;color:var(--muted);font-size:13px}
+@media(max-width:1050px){aside{width:225px}main{margin-left:225px;padding:36px 28px}}@media(max-width:740px){aside{position:static;width:auto;padding:22px}aside a{display:none}aside small{margin-bottom:0}main{margin:0;padding:30px 20px}h1{font-size:34px}}
+@media print{aside{display:none}main{margin:0;max-width:none;padding:0}body{background:white;font-size:10pt}h1{font-size:25pt}h2{font-size:18pt;break-after:avoid}h3{break-after:avoid}pre{white-space:pre-wrap;overflow:visible;background:#f0f3f5;color:#142f40;break-inside:avoid}pre code{white-space:pre-wrap;font-size:8pt}table{display:table;font-size:8pt}a{color:inherit}footer{display:none}}</style></head><body><aside><strong>SOC HOME LAB</strong><small>Setup &amp; operations<br>September 2026</small><a href="#how-to-use-this-guide">How to use this guide</a>
+<a href="#1-repository-corrections">1. Repository corrections</a>
+<a href="#2-hardware-and-software">2. Hardware and software</a>
+<a href="#3-network-and-vm-creation">3. Network and VM creation</a>
+<a href="#4-prepare-the-linux-target">4. Prepare the Linux target</a>
+<a href="#5-install-wazuh-and-enroll-endpoints">5. Install Wazuh and enroll endpoints</a>
+<a href="#6-install-and-validate-suricata">6. Install and validate Suricata</a>
+<a href="#7-send-suricata-events-to-wazuh">7. Send Suricata events to Wazuh</a>
+<a href="#8-install-splunk-and-forward-logs">8. Install Splunk and forward logs</a>
+<a href="#9-build-searches-dashboards-and-alerts">9. Build searches dashboards and alerts</a>
+<a href="#10-run-detection-and-investigation-exercises">10. Run detection and investigation exercises</a>
+<a href="#11-add-microsoft-sentinel">11. Add Microsoft Sentinel</a>
+<a href="#12-operate-the-lab">12. Operate the lab</a>
+<a href="#13-investigate-and-document-incidents">13. Investigate and document incidents</a>
+<a href="#14-troubleshooting">14. Troubleshooting</a>
+<a href="#15-acceptance-checklist">15. Acceptance checklist</a>
+<a href="#16-extensions">16. Extensions</a></aside><main><div class="tag">PRACTICAL LAB MANUAL</div><h1 id="soc-home-lab-setup-and-operations-guide">SOC Home Lab: setup and operations guide</h1>
+<p>Based on <a href="https://github.com/Amit29533/SOC-Home-Lab">Amit29533/SOC-Home-Lab</a>. Reviewed 7 September 2026.</p>
+<p>This is an expanded implementation guide, not a claim that the repository supplies a complete automated deployment. It combines the repository's intended tools with an explicit virtual network, corrected configuration examples, repeatable exercises, and operating procedures. The commands below are instructions for your lab VMs; they have not been executed against a running lab during preparation of this guide.</p>
+<p><strong>Outcome:</strong> Kali generates controlled traffic against a Linux target; Suricata observes it; Wazuh collects endpoint events and Suricata alerts; Splunk searches both raw network events and Wazuh alerts; Wireshark verifies packets. An optional Microsoft Sentinel extension receives Wazuh alerts through an Azure Monitor Agent collector.</p>
+<h2 id="how-to-use-this-guide">How to use this guide</h2>
+<p>Follow sections 1–10 in order. Complete the checkpoint at each stage before moving on. Section 11 adds Sentinel; sections 12–16 cover operations, troubleshooting, and extensions. Commands assume a Bash shell on the named Linux VM unless explicitly labeled otherwise. Replace interface names and downloaded package filenames with those on your machines. Code fragments marked as configuration belong in the specified file, not in a terminal.</p>
+<p>Allow roughly two to four focused sessions for a first build, plus time for downloads and troubleshooting. That is a planning estimate, not an installation guarantee.</p>
+<h3 id="contents">Contents</h3>
+<ol>
+<li><a href="#1-repository-corrections">Repository corrections</a></li>
+<li><a href="#2-hardware-and-software">Hardware and software</a></li>
+<li><a href="#3-network-and-vm-creation">Network and VM creation</a></li>
+<li><a href="#4-prepare-the-linux-target">Prepare the Linux target</a></li>
+<li><a href="#5-install-wazuh-and-enroll-endpoints">Install Wazuh and enroll endpoints</a></li>
+<li><a href="#6-install-and-validate-suricata">Install and validate Suricata</a></li>
+<li><a href="#7-send-suricata-events-to-wazuh">Send Suricata events to Wazuh</a></li>
+<li><a href="#8-install-splunk-and-forward-logs">Install Splunk and forward logs</a></li>
+<li><a href="#9-build-searches-dashboards-and-alerts">Build searches dashboards and alerts</a></li>
+<li><a href="#10-run-detection-and-investigation-exercises">Run detection and investigation exercises</a></li>
+<li><a href="#11-add-microsoft-sentinel">Add Microsoft Sentinel</a></li>
+<li><a href="#12-operate-the-lab">Operate the lab</a></li>
+<li><a href="#13-investigate-and-document-incidents">Investigate and document incidents</a></li>
+<li><a href="#14-troubleshooting">Troubleshooting</a></li>
+<li><a href="#15-acceptance-checklist">Acceptance checklist</a></li>
+<li><a href="#16-extensions">Extensions</a></li>
+</ol>
+<h2 id="1-repository-corrections">1. Repository corrections</h2>
+<p>I reviewed the README and the three actual setup files: <a href="https://github.com/Amit29533/SOC-Home-Lab/blob/main/splunk-setup.md">Splunk</a>, <a href="https://github.com/Amit29533/SOC-Home-Lab/blob/main/suricata-setup.md">Suricata</a>, and <a href="https://github.com/Amit29533/SOC-Home-Lab/blob/main/wazuh-setup.md">Wazuh</a>. The following adjustments make their outline actionable:</p>
+<table>
+<thead>
+<tr>
+<th>Repository instruction or omission</th>
+<th>Implementation in this guide</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Architecture diagram omits a target and capture mechanism</td>
+<td>Separate target and sensor, with a mandatory visibility test</td>
+</tr>
+<tr>
+<td>Example <code>latest/linux/splunk.deb</code> download path</td>
+<td>Use the actual versioned package from Splunk's download page</td>
+</tr>
+<tr>
+<td>Install only <code>wazuh-manager</code>, then use a dashboard</td>
+<td>Install manager, indexer, and dashboard together</td>
+</tr>
+<tr>
+<td>Linux agent command also described for Windows</td>
+<td>Linux installation here; Windows uses its own installer</td>
+</tr>
+<tr>
+<td>Agent configuration mentions <code>&lt;server-ip&gt;</code></td>
+<td>Use <code>&lt;client&gt;&lt;server&gt;&lt;address&gt;…</code></td>
+</tr>
+<tr>
+<td>Add local paths on Splunk to read another VM's logs</td>
+<td>Install Universal Forwarders on the log-producing VMs</td>
+</tr>
+<tr>
+<td>Example searches use <code>action=&quot;alert&quot;</code> and top-level <code>severity</code></td>
+<td>Use EVE <code>event_type</code>, <code>alert.severity</code>, and Wazuh <code>rule.level</code></td>
+</tr>
+<tr>
+<td>Restart described as a Wazuh rule update</td>
+<td>Restart loads changes; it does not fetch new vendor rules</td>
+</tr>
+<tr>
+<td>“Forward to Sentinel workspace” lacks a transport</td>
+<td>Use a Linux collector, Azure Arc, AMA, and a data collection rule</td>
+</tr>
+</tbody>
+</table>
+<p>The README's Splunk → Sentinel arrow is conceptual. This guide deliberately branches Wazuh alerts to both SIEMs. Splunk does not automatically forward dashboards, detections, or incidents to Sentinel. Implementing that literal arrow would be a separate export/integration project.</p>
+<h2 id="2-hardware-and-software">2. Hardware and software</h2>
+<h3 id="21-allocate-resources">2.1 Allocate resources</h3>
+<p>For the five-VM core lab, plan for <strong>32 GB host RAM, SSD storage with about 300 GB free, and hardware virtualization</strong>. More memory helps. These are practical allocations for light exercises, not production sizing or throughput guarantees.</p>
+<table>
+<thead>
+<tr>
+<th>VM</th>
+<th>OS</th>
+<th style="text-align: right;">vCPU</th>
+<th style="text-align: right;">RAM</th>
+<th style="text-align: right;">Virtual disk</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>wazuh01</code></td>
+<td>Ubuntu Server 24.04 LTS, amd64</td>
+<td style="text-align: right;">4</td>
+<td style="text-align: right;">8 GB</td>
+<td style="text-align: right;">80 GB</td>
+<td>Wazuh central components + Splunk forwarder</td>
+</tr>
+<tr>
+<td><code>splunk01</code></td>
+<td>Ubuntu Server 24.04 LTS, amd64</td>
+<td style="text-align: right;">4</td>
+<td style="text-align: right;">8 GB</td>
+<td style="text-align: right;">100 GB</td>
+<td>Splunk indexer and search interface</td>
+</tr>
+<tr>
+<td><code>sensor01</code></td>
+<td>Ubuntu Server 24.04 LTS, amd64</td>
+<td style="text-align: right;">2</td>
+<td style="text-align: right;">3 GB</td>
+<td style="text-align: right;">30 GB</td>
+<td>Suricata + Wazuh agent + Splunk forwarder</td>
+</tr>
+<tr>
+<td><code>target01</code></td>
+<td>Ubuntu Server 24.04 LTS, amd64</td>
+<td style="text-align: right;">2</td>
+<td style="text-align: right;">2 GB</td>
+<td style="text-align: right;">25 GB</td>
+<td>SSH/web target + Wazuh agent</td>
+</tr>
+<tr>
+<td><code>kali01</code></td>
+<td>Kali Linux, amd64</td>
+<td style="text-align: right;">2</td>
+<td style="text-align: right;">2–4 GB</td>
+<td style="text-align: right;">30 GB</td>
+<td>Controlled traffic + Wireshark</td>
+</tr>
+<tr>
+<td><code>collector01</code> — optional</td>
+<td>Ubuntu Server 24.04 LTS, amd64</td>
+<td style="text-align: right;">2</td>
+<td style="text-align: right;">2 GB</td>
+<td style="text-align: right;">25 GB</td>
+<td>Sentinel syslog collector + Arc + AMA</td>
+</tr>
+</tbody>
+</table>
+<p>Wazuh's current quickstart recommends 4 vCPU, 8 GiB RAM, and 50 GB for 1–25 agents. The larger disk above adds lab headroom. <a href="https://documentation.wazuh.com/current/quickstart.html">Wazuh quickstart</a></p>
+<p>If you have only 16 GB RAM, initially run Wazuh, the target, and Kali, placing Suricata on the target's lab interface. Add Splunk later or use another host. A sensor on the target sees that target's traffic; it is not a network-wide sensor.</p>
+<h3 id="22-download-software-and-record-versions">2.2 Download software and record versions</h3>
+<ol>
+<li>Install a hypervisor. This guide uses VirtualBox terminology; use equivalent isolated switches and port mirroring if using another platform.</li>
+<li>Download Ubuntu Server from <a href="https://ubuntu.com/download/server">Ubuntu</a>, Kali from <a href="https://www.kali.org/get-kali/">Kali</a>, and VirtualBox from <a href="https://www.virtualbox.org/wiki/Downloads">Oracle</a>.</li>
+<li>Obtain Splunk Enterprise and the Linux Universal Forwarder from <a href="https://www.splunk.com/en_us/download.html">Splunk downloads</a>. Download the amd64 <code>.deb</code> packages. Record the exact filenames and checksums.</li>
+<li>Check that the selected Splunk version supports your OS and CPU before installing. Enterprise is sufficient for these exercises; Splunk Enterprise Security is not required.</li>
+<li>Check the license shown in Splunk's Licensing page. Trial expiration and license capabilities affect scheduled alerts. Do not assume a permanent free entitlement or a particular ingestion allowance. <a href="https://www.splunk.com/en_us/download/splunk-enterprise.html">Splunk trial</a></li>
+<li>Use vendor checksum/signature instructions to verify downloaded images and packages.</li>
+<li>Keep a build record with OS, application, hypervisor, ruleset versions, installation date, IP addresses, and deviations from this guide. Save passwords separately in a password manager.</li>
+</ol>
+<p>Use the current stable Suricata packages. The Wazuh quickstart reviewed for this guide uses the 4.14 installer series; if you choose a newer series, use matching central components and compatible agents throughout. Avoid combining old repository commands with new package versions without checking their documentation.</p>
+<h2 id="3-network-and-vm-creation">3. Network and VM creation</h2>
+<h3 id="31-understand-the-layout">3.1 Understand the layout</h3>
+<pre><code class="language-text">                         Host browser / administrator
+                                      |
+                     SOC-MGMT — host-only 192.168.56.0/24
+                    /          |          |           \
+               wazuh01     splunk01    sensor01     target01
+                 .20         .30         .10          .21
+                  |                       |            |
+          Wazuh alerts → UF → Splunk       |            |
+                                          |            |
+                     SOC-LAB — internal 10.10.10.0/24
+                                    sensor .10     target .20
+                                          \         /
+                                           Kali .50
+
+Optional: wazuh01 → collector01 (.40 on MGMT) → HTTPS → Azure/Sentinel
+</code></pre>
+<p>The drawing shows connectivity, not a routed path through the sensor. Suricata receives copied traffic through the virtual network's promiscuous capture facility. It does not need to be the target's gateway. The baseline is IDS monitoring; it does not block packets.</p>
+<h3 id="32-create-the-virtual-networks">3.2 Create the virtual networks</h3>
+<ol>
+<li>In VirtualBox's network manager, create a <strong>host-only</strong> network named or documented as <code>SOC-MGMT</code>.</li>
+<li>Set the host adapter to <code>192.168.56.1/24</code>; disable its DHCP server for this static-IP plan.</li>
+<li>Confirm that this subnet does not overlap a physical network or VPN. If it does, choose another private subnet and change every corresponding address in this guide.</li>
+<li>When configuring VM adapters, create an <strong>Internal Network</strong> named exactly <code>SOC-LAB</code>. This is a named internal switch, not a NAT network.</li>
+<li>Do not bridge <code>SOC-LAB</code> to a physical adapter. Do not enable host Internet Connection Sharing or routing between these networks.</li>
+<li>Use an additional <strong>NAT</strong> adapter temporarily for updates. NAT permits outbound access and is not a containment boundary against outbound traffic. Disconnect it from Kali and the target before exercises.</li>
+</ol>
+<p>Internal networking and host-only networking have different host-access properties; VirtualBox also exposes promiscuous mode settings for capture. <a href="https://docs.oracle.com/en/virtualization/virtualbox/7.1/user/networkingdetails.html">Oracle virtual networking</a></p>
+<h3 id="33-create-and-attach-each-vm">3.3 Create and attach each VM</h3>
+<p>Create each VM using the sizing table, attach the OS installer, complete a normal installation, create a non-root administrator such as <code>labadmin</code>, install OpenSSH on Ubuntu, and remove the installer ISO after reboot.</p>
+<table>
+<thead>
+<tr>
+<th>VM</th>
+<th>Adapter 1</th>
+<th>Adapter 2</th>
+<th>Adapter 3</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>wazuh01</code></td>
+<td>MGMT <code>.20</code></td>
+<td>Temporary NAT</td>
+<td>None</td>
+</tr>
+<tr>
+<td><code>splunk01</code></td>
+<td>MGMT <code>.30</code></td>
+<td>Temporary NAT</td>
+<td>None</td>
+</tr>
+<tr>
+<td><code>sensor01</code></td>
+<td>MGMT <code>.10</code></td>
+<td>LAB <code>.10</code>; promiscuous <strong>Allow All</strong></td>
+<td>Temporary NAT</td>
+</tr>
+<tr>
+<td><code>target01</code></td>
+<td>MGMT <code>.21</code></td>
+<td>LAB <code>.20</code></td>
+<td>Temporary NAT</td>
+</tr>
+<tr>
+<td><code>kali01</code></td>
+<td>LAB <code>.50</code></td>
+<td>Temporary NAT</td>
+<td>None</td>
+</tr>
+<tr>
+<td><code>collector01</code></td>
+<td>MGMT <code>.40</code></td>
+<td>NAT for Azure access</td>
+<td>None</td>
+</tr>
+</tbody>
+</table>
+<p>Only the sensor's LAB adapter needs Allow All. Leave the other adapters at their normal settings. Do not give Kali a management adapter.</p>
+<h3 id="34-configure-ubuntu-addresses">3.4 Configure Ubuntu addresses</h3>
+<p>On each Ubuntu VM, identify interfaces and their MAC addresses:</p>
+<pre><code class="language-bash">ip -br link
+ip -br address
+ip route
+</code></pre>
+<p>Match MAC addresses to the hypervisor's adapters. Do not assume interface names are identical across VMs.</p>
+<p>For example, if the sensor's MGMT, LAB, and NAT interfaces are <code>enp0s3</code>, <code>enp0s8</code>, and <code>enp0s9</code>, edit its existing Netplan configuration under <code>/etc/netplan/</code> to contain:</p>
+<pre><code class="language-yaml">network:
+  version: 2
+  renderer: networkd
+  ethernets:
+    enp0s3:
+      dhcp4: false
+      addresses: [192.168.56.10/24]
+    enp0s8:
+      dhcp4: false
+      addresses: [10.10.10.10/24]
+    enp0s9:
+      dhcp4: true
+      optional: true
+</code></pre>
+<p>Use the address table for each other VM. Omit nonexistent interfaces. There must be <strong>no default gateway on MGMT or LAB</strong>; only NAT supplies a default route while attached. Avoid multiple Netplan files defining conflicting settings for the same interface. Back up the original file outside <code>/etc/netplan/</code>, retain any necessary existing settings, then run from the VM console:</p>
+<pre><code class="language-bash">sudo netplan generate
+sudo netplan try
+ip -br address
+ip route
+</code></pre>
+<p>Confirm the trial configuration when connectivity is correct. For Kali, use NetworkManager's connection editor: select its LAB wired connection, set IPv4 to Manual, add <code>10.10.10.50/24</code>, leave gateway/DNS empty, and mark the connection as usable only for resources on its network. Reconnect and verify with <code>ip -br address</code>.</p>
+<h3 id="35-prepare-the-ubuntu-vms">3.5 Prepare the Ubuntu VMs</h3>
+<p>Run on each Ubuntu VM while its NAT adapter is connected:</p>
+<pre><code class="language-bash">sudo apt update
+sudo apt upgrade -y
+sudo apt install -y curl ca-certificates gnupg jq tcpdump acl netcat-openbsd
+sudo timedatectl set-timezone UTC
+sudo timedatectl set-ntp true
+timedatectl status
+</code></pre>
+<p>Set each hostname appropriately, for example on the sensor:</p>
+<pre><code class="language-bash">sudo hostnamectl set-hostname sensor01
+</code></pre>
+<p>Update <code>/etc/hosts</code> if its old hostname remains. On dual-network machines ensure forwarding is disabled:</p>
+<pre><code class="language-bash">sudo tee /etc/sysctl.d/99-soc-lab.conf &gt;/dev/null &lt;&lt;'EOF'
+net.ipv4.ip_forward=0
+net.ipv6.conf.all.forwarding=0
+EOF
+sudo sysctl --system
+</code></pre>
+<p>This is a training network; retain VM console access throughout. Host-only networking still connects to your host. Use only designated lab data and accounts on the target, and direct exercises only at <code>10.10.10.20</code>.</p>
+<h3 id="36-permit-only-the-required-services">3.6 Permit only the required services</h3>
+<p>Use guest firewalls to implement the following table. On Ubuntu, <code>ufw</code> is a convenient option. Allow the management SSH rule before enabling it; keep the VM console available.</p>
+<table>
+<thead>
+<tr>
+<th>Destination</th>
+<th>Allowed source</th>
+<th>Port</th>
+<th>Use</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Ubuntu VMs on MGMT</td>
+<td>Host <code>192.168.56.1</code></td>
+<td>TCP 22</td>
+<td>Administration</td>
+</tr>
+<tr>
+<td><code>wazuh01</code></td>
+<td>Sensor <code>.10</code>, target <code>.21</code> on MGMT</td>
+<td>TCP 1514</td>
+<td>Agent events</td>
+</tr>
+<tr>
+<td><code>wazuh01</code></td>
+<td>Same agents</td>
+<td>TCP 1515</td>
+<td>Enrollment</td>
+</tr>
+<tr>
+<td><code>wazuh01</code></td>
+<td>Host <code>.1</code></td>
+<td>TCP 443</td>
+<td>Dashboard</td>
+</tr>
+<tr>
+<td><code>splunk01</code></td>
+<td>Host <code>.1</code></td>
+<td>TCP 8000</td>
+<td>Splunk Web</td>
+</tr>
+<tr>
+<td><code>splunk01</code></td>
+<td>Sensor <code>.10</code>, Wazuh <code>.20</code></td>
+<td>TCP 9997</td>
+<td>Forwarded logs</td>
+</tr>
+<tr>
+<td><code>target01</code> LAB address</td>
+<td>Kali <code>10.10.10.50</code></td>
+<td>TCP 22, 80; ICMP as needed</td>
+<td>Exercises</td>
+</tr>
+<tr>
+<td><code>collector01</code> — optional</td>
+<td>Wazuh <code>.20</code></td>
+<td>UDP 514</td>
+<td>Wazuh syslog output</td>
+</tr>
+</tbody>
+</table>
+<p>Do not open Wazuh's 9200 or 55000, or Splunk's 8089, to the entire lab just to make dashboards work. Their local services communicate without broadly exposed management APIs.</p>
+<p>Example on <code>wazuh01</code>:</p>
+<pre><code class="language-bash">sudo apt install -y ufw
+sudo ufw default deny incoming
+sudo ufw default allow outgoing
+sudo ufw allow from 192.168.56.1 to any port 22 proto tcp
+sudo ufw allow from 192.168.56.1 to any port 443 proto tcp
+sudo ufw allow from 192.168.56.10 to any port 1514 proto tcp
+sudo ufw allow from 192.168.56.10 to any port 1515 proto tcp
+sudo ufw allow from 192.168.56.21 to any port 1514 proto tcp
+sudo ufw allow from 192.168.56.21 to any port 1515 proto tcp
+sudo ufw enable
+sudo ufw status verbose
+</code></pre>
+<p>Repeat the same pattern on other Ubuntu VMs with their rows. UFW's default ICMP handling may already allow ping; inspect its rules if ping fails. A failed ping alone does not prove that TCP is unreachable.</p>
+<h3 id="37-checkpoint-prove-network-visibility">3.7 Checkpoint: prove network visibility</h3>
+<ol>
+<li>From the host, connect to each Ubuntu MGMT address using SSH.</li>
+<li>On Kali, ping the target: <code>ping -c 3 10.10.10.20</code>.</li>
+<li>On the sensor, run the following on its LAB interface:</li>
+</ol>
+<pre><code class="language-bash">sudo tcpdump -ni enp0s8 'host 10.10.10.50 and host 10.10.10.20'
+</code></pre>
+<ol start="4">
+<li>Repeat the ping from Kali. You must see traffic between Kali and the target, although neither endpoint is the sensor.</li>
+<li>After section 4, repeat using an HTTP request; verify both request and response packets.</li>
+<li>If only broadcast/ARP appears, fix the virtual-switch capture settings. On hypervisors without this capture behavior, configure port mirroring to the sensor. Do not proceed on the assumption that promiscuous mode alone guarantees mirrored traffic.</li>
+<li>As a simpler fallback, install Suricata on the target and capture the target's LAB interface. Record that scope change.</li>
+</ol>
+<p>Take powered-off snapshots named <code>01-network-ready</code> after updating and verifying each VM. Synchronize clocks before disconnecting temporary Internet access and after restoring snapshots.</p>
+<h2 id="4-prepare-the-linux-target">4. Prepare the Linux target</h2>
+<p>On <code>target01</code>:</p>
+<pre><code class="language-bash">sudo apt install -y nginx openssh-server rsyslog
+sudo systemctl enable --now nginx ssh rsyslog
+sudo adduser labuser
+printf '%s\n' 'SOC lab target: normal page' | sudo tee /var/www/html/index.html
+sudo mkdir -p /opt/soc-lab/watch
+printf '%s\n' 'baseline' | sudo tee /opt/soc-lab/watch/test.txt
+sudo ss -lntp
+</code></pre>
+<p>Set a unique lab-only password for <code>labuser</code>. Keep the administrator account separate. Restrict MGMT access to the host and LAB SSH/HTTP access to Kali using section 3.6.</p>
+<p>From Kali:</p>
+<pre><code class="language-bash">curl --max-time 5 http://10.10.10.20/
+ssh labuser@10.10.10.20
+</code></pre>
+<p>Confirm a normal successful login, then exit. If password authentication is disabled and you want the failed-password exercise later, inspect <code>/etc/ssh/sshd_config</code> and its included files; enable <code>PasswordAuthentication yes</code> on this isolated target only. Run <code>sudo sshd -t</code> before restarting <code>ssh</code>. Do not enable root login.</p>
+<p>Check <code>/var/log/auth.log</code> receives authentication events:</p>
+<pre><code class="language-bash">sudo tail -n 20 /var/log/auth.log
+</code></pre>
+<p>If this file is absent, confirm rsyslog is active and the Ubuntu auth/authpriv file rule is present. This guide uses that file for deterministic collection; avoid also collecting the identical authentication messages through journald.</p>
+<h2 id="5-install-wazuh-and-enroll-endpoints">5. Install Wazuh and enroll endpoints</h2>
+<h3 id="51-install-the-central-components-on-wazuh01">5.1 Install the central components on wazuh01</h3>
+<p>Use a clean VM. Download the installer separately so it can be inspected before execution:</p>
+<pre><code class="language-bash">mkdir -p ~/soc-install
+cd ~/soc-install
+curl -fSLO https://packages.wazuh.com/4.14/wazuh-install.sh
+less wazuh-install.sh
+sudo bash ./wazuh-install.sh -a
+</code></pre>
+<p>Record the generated dashboard credentials. Protect the install archive containing credentials, and store a backup securely. Check services:</p>
+<pre><code class="language-bash">sudo systemctl status wazuh-manager wazuh-indexer wazuh-dashboard filebeat --no-pager
+sudo /var/ossec/bin/wazuh-control status
+</code></pre>
+<p>Open <code>https://192.168.56.20</code> from the host. Verify that the certificate belongs to your new VM before accepting its initial self-signed certificate. Log in with the installer-provided credentials. An empty agent list is expected at this point. The assistant installs the complete central stack. <a href="https://documentation.wazuh.com/current/quickstart.html">Installation reference</a></p>
+<p>Record the installed package version:</p>
+<pre><code class="language-bash">dpkg-query -W wazuh-manager wazuh-indexer wazuh-dashboard
+</code></pre>
+<p>Hold central packages during initial lab setup to prevent an accidental partial upgrade:</p>
+<pre><code class="language-bash">sudo apt-mark hold wazuh-manager wazuh-indexer wazuh-dashboard
+</code></pre>
+<p>Later upgrades must be coordinated; these holds are not a permanent patching policy.</p>
+<h3 id="52-install-agents-on-sensor01-and-target01">5.2 Install agents on sensor01 and target01</h3>
+<p>The dashboard's <strong>Deploy new agent</strong> workflow can generate an OS-specific command. Alternatively, on each Ubuntu endpoint add the signed repository:</p>
+<pre><code class="language-bash">curl -fsSL https://packages.wazuh.com/key/GPG-KEY-WAZUH -o /tmp/wazuh-signing-key.asc
+sudo gpg --dearmor --yes -o /usr/share/keyrings/wazuh.gpg /tmp/wazuh-signing-key.asc
+sudo chmod 644 /usr/share/keyrings/wazuh.gpg
+printf '%s\n' 'deb [signed-by=/usr/share/keyrings/wazuh.gpg] https://packages.wazuh.com/4.x/apt/ stable main' | sudo tee /etc/apt/sources.list.d/wazuh.list
+sudo apt update
+apt-cache madison wazuh-agent
+</code></pre>
+<p>Select the agent package version matching your manager. In the next command replace <code>MATCHING_VERSION</code> with the full value from that list, including its package revision; change <code>sensor01</code> to <code>target01</code> on the target:</p>
+<pre><code class="language-bash">sudo env WAZUH_MANAGER=192.168.56.20 WAZUH_AGENT_NAME=sensor01 apt install wazuh-agent=MATCHING_VERSION
+sudo systemctl daemon-reload
+sudo systemctl enable --now wazuh-agent
+sudo apt-mark hold wazuh-agent
+</code></pre>
+<p>If configuring an existing agent manually, edit its existing <code>/var/ossec/etc/ossec.conf</code> client section to use:</p>
+<pre><code class="language-xml">&lt;client&gt;
+  &lt;server&gt;
+    &lt;address&gt;192.168.56.20&lt;/address&gt;
+    &lt;port&gt;1514&lt;/port&gt;
+    &lt;protocol&gt;tcp&lt;/protocol&gt;
+  &lt;/server&gt;
+&lt;/client&gt;
+</code></pre>
+<p>Preserve other client settings and avoid duplicate client sections. Restart the agent after changes. Enrollment and event delivery are different connections; allow both required ports. Use unique agent names and do not clone an already-enrolled agent identity. <a href="https://documentation.wazuh.com/current/installation-guide/wazuh-agent/wazuh-agent-package-linux.html">Linux agent deployment</a></p>
+<h3 id="53-configure-target-telemetry">5.3 Configure target telemetry</h3>
+<p>On <code>target01</code>, back up <code>/var/ossec/etc/ossec.conf</code>. Inside the existing <code>&lt;ossec_config&gt;</code> block, add these entries only if equivalent entries do not already exist:</p>
+<pre><code class="language-xml">&lt;localfile&gt;
+  &lt;log_format&gt;syslog&lt;/log_format&gt;
+  &lt;location&gt;/var/log/auth.log&lt;/location&gt;
+&lt;/localfile&gt;
+&lt;localfile&gt;
+  &lt;log_format&gt;apache&lt;/log_format&gt;
+  &lt;location&gt;/var/log/nginx/access.log&lt;/location&gt;
+&lt;/localfile&gt;
+</code></pre>
+<p>The default Nginx combined access log is compatible with this access-log collection format. If you changed Nginx's log format, inspect decoding before relying on its detections.</p>
+<p>Within the existing <code>&lt;syscheck&gt;</code> section, ensure <code>&lt;disabled&gt;no&lt;/disabled&gt;</code> and add:</p>
+<pre><code class="language-xml">&lt;directories check_all=&quot;yes&quot; realtime=&quot;yes&quot;&gt;/opt/soc-lab/watch&lt;/directories&gt;
+</code></pre>
+<p>Restart and wait for the initial file-integrity scan to finish:</p>
+<pre><code class="language-bash">sudo systemctl restart wazuh-agent
+sudo tail -n 60 /var/ossec/logs/ossec.log
+</code></pre>
+<p>The directory must exist before real-time monitoring begins. The first scan establishes a baseline; modify the file afterward to generate an event. <a href="https://documentation.wazuh.com/current/user-manual/capabilities/file-integrity/basic-settings.html">Wazuh file integrity settings</a></p>
+<h3 id="54-checkpoint">5.4 Checkpoint</h3>
+<p>On <code>wazuh01</code>:</p>
+<pre><code class="language-bash">sudo /var/ossec/bin/agent_control -l
+sudo tail -n 10 /var/ossec/logs/alerts/alerts.json | jq .
+</code></pre>
+<p>Both agents should be active. In the dashboard, confirm their names and recent events. If the alerts file is initially empty, run the file-change exercise in section 10 after the baseline scan. Take <code>02-wazuh-ready</code> snapshots.</p>
+<h2 id="6-install-and-validate-suricata">6. Install and validate Suricata</h2>
+<h3 id="61-install-on-sensor01">6.1 Install on sensor01</h3>
+<pre><code class="language-bash">sudo apt install -y software-properties-common
+sudo add-apt-repository ppa:oisf/suricata-stable
+sudo apt update
+sudo apt install -y suricata jq
+suricata --build-info
+sudo suricata-update
+sudo cp /etc/suricata/suricata.yaml /etc/suricata/suricata.yaml.pre-soc
+</code></pre>
+<p>The stable OISF repository and Suricata-Update provide the engine and managed rules. Record their versions for repeatable testing. <a href="https://docs.suricata.io/en/suricata-7.0.14/install.html">Suricata installation</a>, <a href="https://github.com/OISF/suricata-update/blob/master/doc/quickstart.rst">rule update reference</a></p>
+<h3 id="62-configure-capture-and-eve-output">6.2 Configure capture and EVE output</h3>
+<p>Edit the existing sections in <code>/etc/suricata/suricata.yaml</code>; do not replace the complete file with these fragments.</p>
+<p>Under <code>vars</code> → <code>address-groups</code>, set:</p>
+<pre><code class="language-yaml">HOME_NET: &quot;[10.10.10.0/24]&quot;
+</code></pre>
+<p>Under <code>af-packet</code>, set the actual LAB interface:</p>
+<pre><code class="language-yaml">af-packet:
+  - interface: enp0s8
+    cluster-id: 99
+    cluster-type: cluster_flow
+    defrag: yes
+</code></pre>
+<p>Retain other appropriate package defaults. Inspect <code>sudo systemctl cat suricata</code> and any referenced environment/default file: a command-line interface setting can override your expectation. The running service must capture the LAB interface.</p>
+<p>Find the existing <code>eve-log</code> output and configure a modest set of event types:</p>
+<pre><code class="language-yaml">  - eve-log:
+      enabled: yes
+      filetype: regular
+      filename: eve.json
+      types:
+        - alert
+        - http
+        - dns
+        - tls
+        - flow
+        - stats
+</code></pre>
+<p>Keep <code>default-log-dir: /var/log/suricata/</code>. This baseline omits embedded payload/packet copies to limit event size. Capture a PCAP separately for exercises. <a href="https://docs.suricata.io/en/latest/quickstart.html">Suricata quickstart</a></p>
+<h3 id="63-add-deterministic-lab-rules">6.3 Add deterministic lab rules</h3>
+<p>Create <code>/etc/suricata/rules/local.rules</code>:</p>
+<pre><code class="language-bash">sudo mkdir -p /etc/suricata/rules
+sudo nano /etc/suricata/rules/local.rules
+</code></pre>
+<p>Paste these locally authored exercise rules, one rule per line:</p>
+<pre><code class="language-text">alert http 10.10.10.50 any -&gt; 10.10.10.20 80 (msg:&quot;SOC LAB HTTP marker&quot;; flow:established,to_server; http.uri; content:&quot;/soc-lab-test&quot;; sid:1000001; rev:1;)
+alert tcp 10.10.10.50 any -&gt; 10.10.10.20 any (msg:&quot;SOC LAB SYN burst&quot;; flags:S; flow:stateless; detection_filter:track by_src,count 10,seconds 10; sid:1000002; rev:1;)
+</code></pre>
+<p>In the existing YAML <code>rule-files</code> list include both managed and local rules:</p>
+<pre><code class="language-yaml">default-rule-path: /var/lib/suricata/rules
+rule-files:
+  - suricata.rules
+  - /etc/suricata/rules/local.rules
+</code></pre>
+<p>These rules deliberately use lab addresses. Both attacker and target belong to <code>HOME_NET</code>, so rules requiring <code>$EXTERNAL_NET</code> as the source might never match these internal exercises. The SYN-burst rule is a learning signal, not proof of a port scan or malicious intent. The syntax follows the documented HTTP sticky-buffer and detection-filter mechanisms. <a href="https://docs.suricata.io/en/latest/rules/http-keywords.html">HTTP rule syntax</a>, <a href="https://docs.suricata.io/en/suricata-8.0.3/rules/thresholding.html">thresholding</a></p>
+<p>Validate and start:</p>
+<pre><code class="language-bash">sudo suricata -T -c /etc/suricata/suricata.yaml
+sudo systemctl enable suricata
+sudo systemctl restart suricata
+sudo systemctl status suricata --no-pager
+sudo tail -n 40 /var/log/suricata/suricata.log
+</code></pre>
+<p>If the configuration test fails, correct it before restarting. Use the previous backup to recover if needed.</p>
+<h3 id="64-checkpoint-create-an-alert">6.4 Checkpoint: create an alert</h3>
+<p>On Kali:</p>
+<pre><code class="language-bash">curl --max-time 5 http://10.10.10.20/soc-lab-test
+</code></pre>
+<p>An HTTP 404 is acceptable; the request URI is the marker. On <code>sensor01</code>:</p>
+<pre><code class="language-bash">sudo tail -n 1000 /var/log/suricata/eve.json | jq -c 'select(.event_type == &quot;alert&quot; and .alert.signature_id == 1000001)'
+</code></pre>
+<p>Expect an alert with Kali's source address and target's destination address. If absent, first prove the HTTP packets are visible with tcpdump, then check rule loading and the service interface. Do not start a second capture-mode Suricata process while diagnosing the managed service.</p>
+<h2 id="7-send-suricata-events-to-wazuh">7. Send Suricata events to Wazuh</h2>
+<p>On <strong>sensor01</strong>, back up <code>/var/ossec/etc/ossec.conf</code>. Add inside its existing <code>&lt;ossec_config&gt;</code>:</p>
+<pre><code class="language-xml">&lt;localfile&gt;
+  &lt;log_format&gt;json&lt;/log_format&gt;
+  &lt;location&gt;/var/log/suricata/eve.json&lt;/location&gt;
+&lt;/localfile&gt;
+</code></pre>
+<p>Restart the agent and generate a fresh HTTP marker:</p>
+<pre><code class="language-bash">sudo systemctl restart wazuh-agent
+sudo tail -n 40 /var/ossec/logs/ossec.log
+</code></pre>
+<p>On <code>wazuh01</code>, inspect the arriving alert:</p>
+<pre><code class="language-bash">sudo tail -n 2000 /var/ossec/logs/alerts/alerts.json | jq -c 'select(.data.alert.signature_id? == &quot;1000001&quot; or .data.alert.signature_id? == 1000001)'
+</code></pre>
+<p>In Wazuh's event/Threat Hunting view, filter <code>rule.groups</code> for <code>suricata</code>, choose a recent time range, and expand the raw event. Inspect <code>agent.name</code>, <code>data.src_ip</code>, <code>data.dest_ip</code>, and <code>data.alert.signature_id</code>. UI labels can vary by version. <a href="https://documentation.wazuh.com/current/proof-of-concept-guide/integrate-network-ids-suricata.html">Wazuh Suricata integration</a></p>
+<p><strong>Distinction:</strong> Wazuh's <code>alerts.json</code> contains events that produce alerts at its configured threshold. It is not an archive of every EVE DNS/HTTP/flow record. Splunk's direct EVE input in the next section preserves those additional network events.</p>
+<p>If decoding fails, copy one complete EVE alert line and paste it into <code>/var/ossec/bin/wazuh-logtest</code> on the manager. Inspect decoder and rule results. Use a newly generated live event afterward; logtest does not prove agent transport or write a normal live alert.</p>
+<h2 id="8-install-splunk-and-forward-logs">8. Install Splunk and forward logs</h2>
+<h3 id="81-install-splunk-enterprise-on-splunk01">8.1 Install Splunk Enterprise on splunk01</h3>
+<p>Transfer the downloaded <code>.deb</code> to this VM, for example into <code>~/soc-install/</code>. Substitute its exact name below:</p>
+<pre><code class="language-bash">cd ~/soc-install
+sudo dpkg -i ./SPLUNK_ENTERPRISE_PACKAGE.deb
+id splunk
+</code></pre>
+<p>If the <code>splunk</code> OS account does not exist, create it with <code>sudo useradd --system --create-home --home-dir /opt/splunk --shell /bin/bash splunk</code>. Then:</p>
+<pre><code class="language-bash">sudo chown -R splunk:splunk /opt/splunk
+sudo -u splunk /opt/splunk/bin/splunk start --accept-license
+</code></pre>
+<p>Create the Splunk application administrator credentials when prompted; they are separate from the Linux account. Configure boot startup:</p>
+<pre><code class="language-bash">sudo -u splunk /opt/splunk/bin/splunk stop
+sudo /opt/splunk/bin/splunk enable boot-start -systemd-managed 1 -user splunk -group splunk
+sudo systemctl start Splunkd
+sudo systemctl status Splunkd --no-pager
+</code></pre>
+<p><code>Splunkd</code> is the default generated unit name; if your installer reports another name, use that name consistently. <a href="https://help.splunk.com/en/splunk-enterprise/administer/admin-manual/9.2/start-splunk-enterprise-and-perform-initial-tasks/run-splunk-enterprise-as-a-systemd-service">Splunk systemd setup</a></p>
+<p>Open <code>http://192.168.56.30:8000</code> from the host. Under <strong>Settings → Server settings → General settings</strong>, enable SSL for Splunk Web where offered, restart, and use <code>https://192.168.56.30:8000</code>. Verify the local certificate. Keep access restricted to the host.</p>
+<p>If configuring this by file, create or edit <code>/opt/splunk/etc/system/local/web.conf</code> with the following, preserve existing settings, and restart <code>Splunkd</code>:</p>
+<pre><code class="language-ini">[settings]
+httpport = 8000
+enableSplunkWebSSL = true
+</code></pre>
+<p>The built-in certificate is suitable only as an initial lab convenience; use your own trusted certificate for a durable setup. <a href="https://help.splunk.com/en/splunk-enterprise/administer/manage-users-and-security/10.4/secure-communications-between-splunk-web-and-your-browser/turn-on-https-encryption-for-splunk-web-using-the-web.conf-configuration-file">Splunk Web HTTPS configuration</a></p>
+<h3 id="82-create-indexes-and-event-parsing-settings">8.2 Create indexes and event parsing settings</h3>
+<p>Create a small configuration app on <code>splunk01</code>:</p>
+<pre><code class="language-bash">sudo mkdir -p /opt/splunk/etc/apps/soc_lab/local
+sudo nano /opt/splunk/etc/apps/soc_lab/local/indexes.conf
+</code></pre>
+<p>Use:</p>
+<pre><code class="language-ini">[suricata]
+homePath = $SPLUNK_DB/suricata/db
+coldPath = $SPLUNK_DB/suricata/colddb
+thawedPath = $SPLUNK_DB/suricata/thaweddb
+maxTotalDataSizeMB = 10240
+frozenTimePeriodInSecs = 604800
+
+[wazuh]
+homePath = $SPLUNK_DB/wazuh/db
+coldPath = $SPLUNK_DB/wazuh/colddb
+thawedPath = $SPLUNK_DB/wazuh/thaweddb
+maxTotalDataSizeMB = 10240
+frozenTimePeriodInSecs = 604800
+</code></pre>
+<p>This lab policy limits each index to roughly 10 GB and ages eligible data after seven days. Bucket behavior affects exact deletion timing; the size limit can remove data earlier. Frozen data is deleted unless archiving is explicitly configured. Export exercise evidence you need to retain.</p>
+<p>Create <code>props.conf</code> in the same directory:</p>
+<pre><code class="language-ini">[suricata:eve]
+SHOULD_LINEMERGE = false
+LINE_BREAKER = ([\r\n]+)
+TIME_PREFIX = &quot;timestamp&quot;\s*:\s*&quot;
+MAX_TIMESTAMP_LOOKAHEAD = 40
+TRUNCATE = 100000
+KV_MODE = json
+
+[wazuh:alerts]
+SHOULD_LINEMERGE = false
+LINE_BREAKER = ([\r\n]+)
+TIME_PREFIX = &quot;timestamp&quot;\s*:\s*&quot;
+MAX_TIMESTAMP_LOOKAHEAD = 40
+TRUNCATE = 100000
+KV_MODE = json
+</code></pre>
+<p>The design uses one JSON document per line and search-time JSON extraction. It intentionally leaves timestamp format recognition to Splunk after locating <code>timestamp</code>; validate <code>_time</code> against the raw timestamp. Do not also enable <code>INDEXED_EXTRACTIONS=JSON</code> on these inputs, which would introduce a different parsing strategy. <a href="https://help.splunk.com/en/splunk-enterprise/administer/admin-manual/9.4/configuration-file-reference/9.4.0-configuration-file-reference/props.conf">Splunk props.conf reference</a></p>
+<p>Create <code>inputs.conf</code> in the same directory:</p>
+<pre><code class="language-ini">[splunktcp://9997]
+disabled = 0
+</code></pre>
+<p>This is a Splunk-to-Splunk receiver, not a raw TCP JSON or syslog input. The baseline 9997 connection is unencrypted and restricted to the two forwarders on the private host-only network. Before using a shared or routed network, replace it with certificate-validated Splunk TLS forwarding; an SSL checkbox in Splunk Web does not encrypt port 9997.</p>
+<p>Apply the configuration:</p>
+<pre><code class="language-bash">sudo chown -R splunk:splunk /opt/splunk/etc/apps/soc_lab
+sudo -u splunk /opt/splunk/bin/splunk btool check
+sudo systemctl restart Splunkd
+sudo ss -lntp | grep 9997
+</code></pre>
+<h3 id="83-install-a-universal-forwarder-on-sensor01-and-wazuh01">8.3 Install a Universal Forwarder on sensor01 and wazuh01</h3>
+<p>Transfer the Linux Universal Forwarder <code>.deb</code> to each machine. On each:</p>
+<pre><code class="language-bash">sudo dpkg -i ./SPLUNK_FORWARDER_PACKAGE.deb
+id splunkfwd
+</code></pre>
+<p>Current Linux packages normally create <code>splunkfwd</code>. If missing, create it with <code>sudo useradd --system --create-home --home-dir /opt/splunkforwarder --shell /bin/bash splunkfwd</code>. Then:</p>
+<pre><code class="language-bash">sudo chown -R splunkfwd:splunkfwd /opt/splunkforwarder
+sudo -u splunkfwd /opt/splunkforwarder/bin/splunk start --accept-license
+sudo -u splunkfwd /opt/splunkforwarder/bin/splunk stop
+sudo /opt/splunkforwarder/bin/splunk enable boot-start -systemd-managed 1 -user splunkfwd -group splunkfwd
+sudo systemctl list-unit-files | grep -i splunk
+</code></pre>
+<p>Record the forwarder's generated service name. The instructions below use <code>SplunkForwarder</code>; substitute the reported name if different. <a href="https://help.splunk.com/en/splunk-enterprise/forward-and-process-data/universal-forwarder-manual/10.0/install-the-universal-forwarder/install-a-nix-universal-forwarder">Forwarder installation</a>, <a href="https://help.splunk.com/en/data-management/forward-data/universal-forwarder-manual/9.2/working-with-the-universal-forwarder/manage-a-linux-least-privileged-user">least-privileged service setup</a></p>
+<p>On both forwarders, create <code>/opt/splunkforwarder/etc/apps/soc_lab/local/outputs.conf</code>:</p>
+<pre><code class="language-ini">[tcpout]
+defaultGroup = soc_indexer
+
+[tcpout:soc_indexer]
+server = 192.168.56.30:9997
+useACK = true
+</code></pre>
+<p>Create the parent directory first using <code>sudo mkdir -p /opt/splunkforwarder/etc/apps/soc_lab/local</code>.</p>
+<p>On <strong>sensor01 only</strong>, create <code>inputs.conf</code> in that directory:</p>
+<pre><code class="language-ini">[monitor:///var/log/suricata/eve.json]
+disabled = 0
+index = suricata
+sourcetype = suricata:eve
+host = sensor01
+</code></pre>
+<p>On <strong>wazuh01 only</strong>, create its <code>inputs.conf</code>:</p>
+<pre><code class="language-ini">[monitor:///var/ossec/logs/alerts/alerts.json]
+disabled = 0
+index = wazuh
+sourcetype = wazuh:alerts
+host = wazuh01
+</code></pre>
+<p>Do not monitor entire <code>/var/ossec/logs/</code> or <code>/var/log/suricata/</code> trees. Those include diagnostic logs, rotated files, and alternate representations of the same data. Do not add these source paths on the remote Splunk server itself.</p>
+<h3 id="84-grant-file-access-and-account-for-rotation">8.4 Grant file access and account for rotation</h3>
+<p>On <strong>sensor01</strong>:</p>
+<pre><code class="language-bash">sudo setfacl -m u:splunkfwd:rx /var/log/suricata
+sudo setfacl -m u:splunkfwd:r /var/log/suricata/eve.json
+sudo setfacl -m d:u:splunkfwd:rx /var/log/suricata
+sudo -u splunkfwd head -n 1 /var/log/suricata/eve.json
+</code></pre>
+<p>On <strong>wazuh01</strong>:</p>
+<pre><code class="language-bash">sudo setfacl -m u:splunkfwd:--x /var/ossec /var/ossec/logs
+sudo setfacl -m u:splunkfwd:r-x /var/ossec/logs/alerts
+sudo setfacl -m u:splunkfwd:r-- /var/ossec/logs/alerts/alerts.json
+sudo setfacl -m d:u:splunkfwd:r-x /var/ossec/logs/alerts
+sudo -u splunkfwd head -n 1 /var/ossec/logs/alerts/alerts.json
+</code></pre>
+<p>Default ACLs help new files inherit access. Creation modes, file moves, or later chmod operations can still change effective permissions. Repeat the read test after the next actual log rotation, and inspect <code>getfacl</code> if collection stops. Do not fix permissions by making all security logs world-readable. Splunk's service may also have read capabilities; the explicit account tests verify access without relying on those capabilities.</p>
+<p>On both forwarders:</p>
+<pre><code class="language-bash">sudo chown -R splunkfwd:splunkfwd /opt/splunkforwarder/etc/apps/soc_lab
+sudo -u splunkfwd /opt/splunkforwarder/bin/splunk btool check
+sudo systemctl start SplunkForwarder
+nc -vz 192.168.56.30 9997
+sudo -u splunkfwd /opt/splunkforwarder/bin/splunk list forward-server
+</code></pre>
+<p>The CLI may prompt for the forwarder's application credentials. The receiver should appear as active. Inspect <code>/opt/splunkforwarder/var/log/splunk/splunkd.log</code> if it does not.</p>
+<h3 id="85-checkpoint-verify-fields-and-time">8.5 Checkpoint: verify fields and time</h3>
+<p>Generate another HTTP marker from Kali. In Splunk Search &amp; Reporting, choose <strong>Last 15 minutes</strong> and run:</p>
+<pre><code class="language-spl">(index=suricata OR index=wazuh)
+| stats count latest(_time) AS latest_event by index sourcetype host
+| convert ctime(latest_event)
+</code></pre>
+<p>Inspect the raw Suricata alert:</p>
+<pre><code class="language-spl">index=suricata event_type=alert alert.signature_id=1000001
+| table _time timestamp host src_ip dest_ip alert.signature alert.severity
+</code></pre>
+<p>Inspect its Wazuh representation:</p>
+<pre><code class="language-spl">index=wazuh data.alert.signature_id=1000001
+| table _time timestamp agent.name rule.id rule.level data.src_ip data.dest_ip
+</code></pre>
+<p>Check that timestamps represent the same moment, JSON is not truncated, and fields are populated. If events appear only under All time, diagnose timestamp parsing before creating scheduled alerts.</p>
+<p><strong>Counting rule:</strong> the direct EVE alert and Wazuh's representation are two records describing the same activity. Do not add their counts and call the sum unique attacks. Take <code>03-pipeline-ready</code> snapshots after stopping services and shutting down cleanly.</p>
+<h2 id="9-build-searches-dashboards-and-alerts">9. Build searches dashboards and alerts</h2>
+<p>The following searches are written for this guide's raw JSON sourcetypes, not for an installed third-party data model. Validate fields against one expanded event before saving them.</p>
+<h3 id="91-network-alerts-by-signature">9.1 Network alerts by signature</h3>
+<pre><code class="language-spl">index=suricata event_type=alert
+| stats count AS alerts by alert.signature src_ip dest_ip
+| sort - alerts
+</code></pre>
+<h3 id="92-alert-timeline">9.2 Alert timeline</h3>
+<pre><code class="language-spl">index=suricata event_type=alert
+| timechart span=1m count by alert.signature limit=10
+</code></pre>
+<h3 id="93-wazuh-events-at-or-above-a-chosen-level">9.3 Wazuh events at or above a chosen level</h3>
+<pre><code class="language-spl">index=wazuh
+| where tonumber('rule.level') &gt;= 7
+| stats count AS alerts by agent.name rule.level rule.description
+| sort - alerts
+</code></pre>
+<p>Wazuh levels and Suricata priorities are different scales. Higher Wazuh levels indicate greater severity; Suricata priority/severity 1 is conventionally highest. Do not directly compare the numbers as one common scale.</p>
+<h3 id="94-http-activity-for-a-suspected-source">9.4 HTTP activity for a suspected source</h3>
+<pre><code class="language-spl">index=suricata event_type=http src_ip=10.10.10.50
+| table _time src_ip dest_ip http.hostname http.url http.http_method http.status
+| sort _time
+</code></pre>
+<p>Some HTTP fields depend on what was observed in the transaction. Missing status can indicate incomplete capture or an unfinished response, not necessarily a failed request.</p>
+<h3 id="95-compare-network-and-endpoint-evidence">9.5 Compare network and endpoint evidence</h3>
+<pre><code class="language-spl">(index=suricata src_ip=10.10.10.50)
+OR (index=wazuh (data.srcip=10.10.10.50 OR data.src_ip=10.10.10.50))
+| eval source_ip=coalesce(src_ip,'data.srcip','data.src_ip')
+| eval destination_ip=coalesce(dest_ip,'data.dest_ip','agent.ip')
+| eval description=coalesce('alert.signature','rule.description',event_type)
+| table _time index agent.name source_ip destination_ip description
+| sort _time
+</code></pre>
+<p><code>agent.ip</code> may be a management address, not the target's LAB address. Preserve the asset inventory rather than assuming two different IPs mean two different endpoints. This timeline assists investigation; it is not a deduplication or correlation engine.</p>
+<h3 id="96-build-a-dashboard">9.6 Build a dashboard</h3>
+<ol>
+<li>Run each search individually and confirm meaningful results.</li>
+<li>Save the timeline as a line-chart panel in a new dashboard named <code>SOC Lab Overview</code>.</li>
+<li>Add a table for top signatures and a table for Wazuh events.</li>
+<li>Add a single-value panel using <code>index=suricata event_type=alert | stats count</code>.</li>
+<li>Add a data-freshness table:</li>
+</ol>
+<pre><code class="language-spl">(index=suricata OR index=wazuh)
+| stats latest(_time) AS last_event by index host
+| eval seconds_since_event=round(now()-last_event)
+| convert ctime(last_event)
+</code></pre>
+<ol start="6">
+<li>Add a shared time picker, initially Last 60 minutes. Confirm each panel uses the intended time range.</li>
+<li>Label panels precisely: <code>Suricata alert records</code>, not <code>Attacks stopped</code>.</li>
+</ol>
+<p>An idle log source may legitimately produce no alerts. A freshness panel based on alert data is an investigation hint; combine it with agent/service status or a periodic known marker to test pipeline health.</p>
+<h3 id="97-create-a-scheduled-lab-alert">9.7 Create a scheduled lab alert</h3>
+<p>Use this deterministic search:</p>
+<pre><code class="language-spl">index=suricata event_type=alert alert.signature_id=1000001
+</code></pre>
+<ol>
+<li>Select <strong>Save As → Alert</strong>.</li>
+<li>Name it <code>SOC LAB — HTTP marker detected</code>.</li>
+<li>Use a scheduled search every five minutes, with an initial range of earliest <code>-6m@m</code> and latest <code>-1m@m</code> to allow a minute of ingestion delay.</li>
+<li>Trigger when the number of results is greater than zero.</li>
+<li>Use the Triggered Alerts action where available; no external notifications are required for testing.</li>
+<li>Generate a marker, wait for the next relevant run, and verify a triggered alert.</li>
+<li>Inspect execution history if nothing triggers. A working manual search does not prove the scheduler, permissions, or license allows alerting.</li>
+</ol>
+<p>This narrow timing window is a starting point. Measure ingestion latency and adjust the delay/lookback. Overlapping windows can create duplicates; introduce suppression or stable event-ID deduplication if you overlap them.</p>
+<h2 id="10-run-detection-and-investigation-exercises">10. Run detection and investigation exercises</h2>
+<p>For every exercise, record a case ID, UTC start/end times, expected observation, actual result, and evidence locations. Disconnect Kali and the target's temporary NAT adapters. Start captures before generating traffic.</p>
+<h3 id="101-exercise-a-http-marker-end-to-end">10.1 Exercise A — HTTP marker, end to end</h3>
+<p><strong>Purpose:</strong> prove the complete network detection pipeline with a benign, deterministic request.</p>
+<p>On <code>sensor01</code>:</p>
+<pre><code class="language-bash">mkdir -p ~/soc-evidence/EX-A
+sudo timeout 90 tcpdump -ni enp0s8 -s 0 -w /tmp/soc-ex-a.pcap 'host 10.10.10.50 and host 10.10.10.20'
+</code></pre>
+<p>While capture runs, on Kali:</p>
+<pre><code class="language-bash">date -u
+curl --max-time 5 http://10.10.10.20/soc-lab-test
+</code></pre>
+<p>After capture finishes on the sensor:</p>
+<pre><code class="language-bash">sudo cp /tmp/soc-ex-a.pcap ~/soc-evidence/EX-A/
+sudo chown &quot;$(id -un):$(id -gn)&quot; ~/soc-evidence/EX-A/soc-ex-a.pcap
+sha256sum ~/soc-evidence/EX-A/soc-ex-a.pcap
+</code></pre>
+<p>Verify in this order:</p>
+<ol>
+<li>PCAP contains the HTTP request.</li>
+<li>EVE contains signature ID <code>1000001</code>.</li>
+<li>Wazuh contains the matching Suricata alert attributed to <code>sensor01</code>.</li>
+<li>Splunk contains both representations in their respective indexes.</li>
+<li>The scheduled Splunk alert triggers.</li>
+<li>If Sentinel is enabled, its Wazuh alert arrives too.</li>
+</ol>
+<h3 id="102-exercise-b-controlled-syn-scan">10.2 Exercise B — controlled SYN scan</h3>
+<p>On Kali, ensure Nmap is installed during the preparation phase. Then run only against your designated target:</p>
+<pre><code class="language-bash">sudo nmap -sS -Pn -n -p 1-100 --max-rate 20 10.10.10.20
+</code></pre>
+<p>Search for:</p>
+<pre><code class="language-spl">index=suricata event_type=alert alert.signature_id=1000002
+| table _time src_ip dest_ip dest_port alert.signature
+</code></pre>
+<p>Expect the local SYN-burst rule to match if more than ten matching SYNs are observed within ten seconds. Retransmissions can also contribute. This rule may produce multiple alert records and does not guarantee a one-scan/one-alert relationship.</p>
+<p>Confirm the scan using packets, not just the alert message: repeated SYNs from one source to different destination ports support the port-scan interpretation. Open ports and firewall behavior determine responses. Do not assume the downloaded community ruleset must detect this exact scan.</p>
+<h3 id="103-exercise-c-failed-ssh-authentication">10.3 Exercise C — failed SSH authentication</h3>
+<p>From Kali, make three to five manual attempts with the wrong password for your lab account:</p>
+<pre><code class="language-bash">ssh -o PreferredAuthentications=password -o PubkeyAuthentication=no -o NumberOfPasswordPrompts=1 labuser@10.10.10.20
+</code></pre>
+<p>On the target, verify failed-password entries in <code>/var/log/auth.log</code>. In Splunk:</p>
+<pre><code class="language-spl">index=wazuh agent.name=target01
+| search &quot;Failed password&quot; OR &quot;authentication failed&quot; OR &quot;sshd&quot;
+| table _time rule.id rule.level rule.description data.srcip data.dstuser full_log
+</code></pre>
+<p>Inspect actual rule IDs and decoded fields before building an aggregate detection. A small number of failures may produce individual authentication alerts without reaching a built-in brute-force threshold.</p>
+<p><strong>Learning point:</strong> Suricata can observe an SSH connection's network behavior, but encrypted SSH does not expose password outcomes. The target's authentication logs supply that evidence.</p>
+<h3 id="104-exercise-d-file-integrity-change">10.4 Exercise D — file-integrity change</h3>
+<p>After Wazuh's initial scan completes, on <code>target01</code>:</p>
+<pre><code class="language-bash">date -u
+printf '%s\n' 'exercise D: changed' | sudo tee -a /opt/soc-lab/watch/test.txt
+</code></pre>
+<p>Search:</p>
+<pre><code class="language-spl">index=wazuh agent.name=target01 syscheck.path=&quot;/opt/soc-lab/watch/test.txt&quot;
+| table _time rule.description syscheck.path syscheck.event syscheck.sha256_before syscheck.sha256_after
+</code></pre>
+<p>You should see a modification event, with available before/after hashes. Restore the file content afterward; the restoration may create another legitimate event. This exercise validates file monitoring, not malware detection.</p>
+<h3 id="105-open-and-analyze-the-pcap-in-wireshark">10.5 Open and analyze the PCAP in Wireshark</h3>
+<p>Install Wireshark from its official package/source on the host or use Kali's copy. Transfer the sensor's PCAP through your management connection, then open it with <strong>File → Open</strong>. Wireshark is used here for packet evidence, independent of the SIEM. <a href="https://www.wireshark.org/docs/wsug_html_chunked/ChapterIntroduction.html">Wireshark documentation</a></p>
+<p>Useful <strong>display filters</strong>:</p>
+<pre><code class="language-text">ip.addr == 10.10.10.50 &amp;&amp; ip.addr == 10.10.10.20
+http.request.uri contains &quot;soc-lab-test&quot;
+tcp.flags.syn == 1 &amp;&amp; tcp.flags.ack == 0
+tcp.port == 22
+</code></pre>
+<ol>
+<li>Select the HTTP request and inspect the request URI.</li>
+<li>Use <strong>Follow → TCP Stream</strong> to view request/response context.</li>
+<li>Compare packet time, source/destination addresses, and ports with the Suricata event.</li>
+<li>For the scan, inspect destination port changes and replies.</li>
+<li>Note that capture filters used by tcpdump and Wireshark display filters are different syntaxes.</li>
+<li>Preserve the original PCAP and its hash; save annotations or filtered exports separately.</li>
+</ol>
+<p>TLS and SSH traffic generally reveal metadata rather than application plaintext. Do not interpret absent plaintext as a capture failure.</p>
+<h2 id="11-add-microsoft-sentinel">11. Add Microsoft Sentinel</h2>
+<p>Complete the local pipeline first. This extension uses a <strong>separate collector VM</strong> so cloud forwarding and received syslog do not feed back into the Wazuh manager's own log collection.</p>
+<pre><code class="language-text">wazuh01 alerts → JSON syslog / UDP 514 → collector01 rsyslog
+                                         → AMA → HTTPS → Log Analytics / Sentinel
+</code></pre>
+<p>This is a small training transport. UDP does not guarantee delivery, and oversized messages can be lost or truncated. Keep Wazuh's original alerts and the Splunk copy as local evidence. For a production-style extension, use a supported reliable, encrypted export path and test loss, queues, size limits, and recovery explicitly.</p>
+<h3 id="111-create-cloud-resources-and-cost-controls">11.1 Create cloud resources and cost controls</h3>
+<ol>
+<li>Use a subscription where you can create a resource group, Log Analytics workspace, Sentinel resources, DCRs, and Arc/AMA extensions. Relevant scoped roles include Monitoring Contributor and Azure Connected Machine Resource Administrator; workspace/Sentinel onboarding also needs appropriate workspace permissions.</li>
+<li>Create a dedicated resource group, such as <code>rg-soc-lab</code>, in your chosen region.</li>
+<li>Create a Log Analytics workspace named <code>law-soc-lab</code> in that group.</li>
+<li>Open Microsoft Sentinel and add/enable it on this workspace.</li>
+<li>Review the current pricing and your subscription's eligibility for any trial. Do not assume the cloud extension is free.</li>
+<li>Configure an Azure budget alert and review workspace ingestion/retention settings. A budget sends notifications; it is not an automatic spending stop. A daily cap can reduce ingestion but is not an exact total-cost limit.</li>
+<li>Start with only the Wazuh alert stream. Keep raw EVE flow records and PCAPs local.</li>
+</ol>
+<p>The current connector supports Azure and Defender portal workflows; navigation labels may move. <a href="https://learn.microsoft.com/en-us/azure/sentinel/connect-cef-syslog-ama">Sentinel connector prerequisites</a>, <a href="https://learn.microsoft.com/en-us/azure/sentinel/billing-reduce-costs">cost controls</a></p>
+<h3 id="112-prepare-collector01-and-connect-azure-arc">11.2 Prepare collector01 and connect Azure Arc</h3>
+<ol>
+<li>Build <code>collector01</code> with MGMT address <code>192.168.56.40</code> and a NAT adapter for cloud access; no LAB adapter.</li>
+<li>Apply the common Ubuntu preparation steps and synchronize time.</li>
+<li>Install and enable rsyslog: <code>sudo apt install -y rsyslog</code> and <code>sudo systemctl enable --now rsyslog</code>.</li>
+<li>In Azure Arc → Servers → Add/Create, select onboarding of a single non-Azure server.</li>
+<li>Choose the resource group, region, and Linux OS; generate the onboarding script.</li>
+<li>Inspect and run that tenant-specific script on <code>collector01</code>, authenticate using the offered flow, and verify that the Arc resource becomes <strong>Connected</strong>.</li>
+<li>Retain outbound HTTPS/DNS connectivity to the documented Azure endpoints. No public inbound port forwarding is required.</li>
+</ol>
+<p>Azure Arc makes the local VM available for Azure management; AMA is the separate component that collects the logs. <a href="https://learn.microsoft.com/en-us/azure/azure-arc/servers/onboard-portal">Arc onboarding</a></p>
+<h3 id="113-configure-syslog-via-ama">11.3 Configure Syslog via AMA</h3>
+<ol>
+<li>Install the <strong>Syslog</strong> solution from Sentinel's Content hub.</li>
+<li>Open <strong>Data connectors → Syslog via AMA → Open connector page</strong>.</li>
+<li>Create a DCR named <code>dcr-soc-lab-syslog</code>.</li>
+<li>Select <code>collector01</code> as the resource and <code>law-soc-lab</code> as the destination.</li>
+<li>During initial validation, select all syslog facilities and severities. This dedicated collector should have very little traffic. Later narrow collection to the observed Wazuh facility and severity.</li>
+<li>Complete creation and verify that the <code>AzureMonitorLinuxAgent</code> extension is provisioned successfully and the DCR is associated with <code>collector01</code>.</li>
+<li>Follow the connector's Linux forwarder configuration step. Run the current installation script displayed by that connector to configure rsyslog's receiving/AMA connection.</li>
+<li>Verify a UDP 514 listener using <code>sudo ss -lunp | grep ':514'</code>. If a listener already exists, do not add another duplicate input.</li>
+<li>Restrict guest firewall ingress to UDP 514 from <code>192.168.56.20</code> only. Do not expose it via the NAT adapter or a router forwarding rule.</li>
+</ol>
+<p>For a missing UDP listener, inspect <code>/etc/rsyslog.conf</code> and <code>/etc/rsyslog.d/</code>. If the connector installed no UDP input, add one file with:</p>
+<pre><code class="language-text">module(load=&quot;imudp&quot;)
+input(type=&quot;imudp&quot; port=&quot;514&quot;)
+</code></pre>
+<p>Only load <code>imudp</code> once. Validate with <code>sudo rsyslogd -N1</code>, then restart rsyslog. Preserve the AMA-generated forwarding configuration rather than hard-coding an internal AMA port. <a href="https://learn.microsoft.com/en-us/azure/sentinel/forward-syslog-monitor-agent">Forwarder tutorial</a></p>
+<h3 id="114-verify-transport-before-sending-wazuh-data">11.4 Verify transport before sending Wazuh data</h3>
+<p>From <code>wazuh01</code>:</p>
+<pre><code class="language-bash">logger --udp --server 192.168.56.40 --port 514 --tag soc-lab -p local5.info 'SOC-LAB-AMA-SMOKE-TEST'
+</code></pre>
+<p>On the collector, verify arrival using <code>sudo tcpdump -ni any udp port 514</code>. In workspace Logs:</p>
+<pre><code class="language-kusto">Syslog
+| where TimeGenerated &gt; ago(30m)
+| where SyslogMessage has &quot;SOC-LAB-AMA-SMOKE-TEST&quot;
+| project TimeGenerated, Computer, Facility, SeverityLevel, ProcessName, SyslogMessage
+</code></pre>
+<p>Initial connector setup can take time; Microsoft advises that syslog can take up to 20 minutes to appear after configuration. A connected extension alone does not prove ingestion. <a href="https://learn.microsoft.com/en-us/azure/sentinel/cef-syslog-ama-troubleshooting">AMA troubleshooting</a></p>
+<h3 id="115-enable-wazuh-json-syslog-output">11.5 Enable Wazuh JSON syslog output</h3>
+<p>On <code>wazuh01</code>, back up <code>/var/ossec/etc/ossec.conf</code>. Ensure the existing <code>&lt;global&gt;</code> section contains <code>&lt;jsonout_output&gt;yes&lt;/jsonout_output&gt;</code>. Add inside the top-level configuration:</p>
+<pre><code class="language-xml">&lt;syslog_output&gt;
+  &lt;server&gt;192.168.56.40&lt;/server&gt;
+  &lt;port&gt;514&lt;/port&gt;
+  &lt;format&gt;json&lt;/format&gt;
+  &lt;level&gt;3&lt;/level&gt;
+&lt;/syslog_output&gt;
+</code></pre>
+<p>Level 3 is an initial lab threshold so ordinary test alerts are included; it cannot recover events below the manager's own alert-writing threshold. Raise it later only after checking which exercises would be excluded. Restart the manager and generate a <strong>new</strong> HTTP marker. <a href="https://documentation.wazuh.com/current/user-manual/reference/ossec-conf/syslog-output.html">Wazuh syslog output</a></p>
+<pre><code class="language-bash">sudo systemctl restart wazuh-manager
+sudo /var/ossec/bin/wazuh-control status
+</code></pre>
+<h3 id="116-parse-and-validate-in-kql">11.6 Parse and validate in KQL</h3>
+<p>Run in workspace Logs:</p>
+<pre><code class="language-kusto">Syslog
+| where TimeGenerated &gt; ago(1h)
+| extend JsonText = extract(@&quot;(\{.*\})&quot;, 1, SyslogMessage)
+| extend W = parse_json(JsonText)
+| where isnotempty(tostring(W.rule.id))
+| extend WazuhId = tostring(W.id),
+         EventTime = todatetime(W.timestamp),
+         Agent = tostring(W.agent.name),
+         RuleId = tostring(W.rule.id),
+         RuleLevel = toint(W.rule.level),
+         Description = tostring(W.rule.description),
+         SrcIp = coalesce(tostring(W.data.srcip), tostring(W.data.src_ip)),
+         SignatureId = tostring(W.data.alert.signature_id)
+| project TimeGenerated, EventTime, WazuhId, Agent, RuleId,
+          RuleLevel, Description, SrcIp, SignatureId, Facility, SeverityLevel
+| order by TimeGenerated desc
+</code></pre>
+<p>The JSON extraction accommodates a syslog prefix. Confirm the actual payload has complete braces and parseable fields. If parsing fails, inspect <code>SyslogMessage</code> without filtering; do not silently treat dropped rows as successful ingestion.</p>
+<p>Compare the Wazuh event ID and marker signature with the local alert. <code>TimeGenerated</code> is the syslog record's time; <code>EventTime</code> is the original embedded Wazuh time. Preserve both. Once working, narrow the DCR to the actual facility/severity observed, repeat the test, and check for losses.</p>
+<h3 id="117-create-a-sentinel-incident-from-the-marker">11.7 Create a Sentinel incident from the marker</h3>
+<p>Create a scheduled analytics rule using:</p>
+<pre><code class="language-kusto">Syslog
+| extend W = parse_json(extract(@&quot;(\{.*\})&quot;, 1, SyslogMessage))
+| where tostring(W.data.alert.signature_id) == &quot;1000001&quot;
+| extend WazuhId = tostring(W.id),
+         SrcIp = tostring(W.data.src_ip),
+         DstIp = tostring(W.data.dest_ip),
+         Agent = tostring(W.agent.name)
+| summarize arg_max(TimeGenerated, *) by WazuhId
+</code></pre>
+<ol>
+<li>Name it <code>SOC LAB — Wazuh HTTP marker</code> and use Low severity for this benign test.</li>
+<li>Run every five minutes with a ten-minute lookback during initial latency testing.</li>
+<li>Trigger if results exceed zero and enable incident creation.</li>
+<li>Map IP Address entities to <code>SrcIp</code> and <code>DstIp</code> where the editor allows; retain Agent and WazuhId as custom details.</li>
+<li>Use alert/incident grouping or suppression to control repeated results across overlapping runs. The <code>summarize</code> above removes duplicates within a run only.</li>
+<li>Generate a fresh marker, verify the alert and incident, inspect entities, add an analyst note, and close with a classification explaining the authorized lab simulation.</li>
+</ol>
+<p>Record observed ingestion delay and tune the lookback accordingly. Do not label an authorized simulation as a real compromise. <a href="https://learn.microsoft.com/en-us/azure/sentinel/create-analytics-rules">Scheduled analytics rules</a></p>
+<h3 id="118-cloud-shutdown-and-cleanup">11.8 Cloud shutdown and cleanup</h3>
+<p>For a short pause, stop Wazuh syslog forwarding and the collector; review retained storage costs. For full teardown, export wanted evidence and rule definitions, disconnect/remove the Arc registration following its cleanup instructions, and delete the dedicated lab resource group only after verifying it contains no unrelated resources. Check for any resources created outside it. Stopping a local VM does not delete cloud storage or other billable resources.</p>
+<h2 id="12-operate-the-lab">12. Operate the lab</h2>
+<h3 id="121-start-of-session-procedure">12.1 Start-of-session procedure</h3>
+<ol>
+<li>Start <code>wazuh01</code> and <code>splunk01</code> first.</li>
+<li>Wait for their dashboards to load and central services to become healthy.</li>
+<li>Start <code>sensor01</code>, then <code>target01</code>; verify Wazuh agent connections and forwarder status.</li>
+<li>Start the optional collector and verify Arc/AMA when using Sentinel.</li>
+<li>Start Kali last. Confirm it has only its intended LAB connectivity for exercises.</li>
+<li>Check clock synchronization after any snapshot restore. If updating requires NAT, temporarily reconnect it, synchronize, then disconnect it from exercise endpoints.</li>
+<li>Check free disk and memory on sensor and SIEM VMs:</li>
+</ol>
+<pre><code class="language-bash">df -h
+free -h
+</code></pre>
+<ol start="8">
+<li>Check sensor capture statistics and log growth. Investigate sustained packet drops, permission errors, or indexing backlogs.</li>
+<li>Run one HTTP marker and verify the full path. Record the health-check time so it can be excluded from exercise counts.</li>
+<li>Create the new case folder and begin packet capture if required.</li>
+</ol>
+<h3 id="122-during-a-session">12.2 During a session</h3>
+<p>Keep a UTC activity log. Record each command and target before running it. Check results at the source first, then at each downstream system. Preserve anomalies: a missed event is a useful finding if you document where it disappeared. Change one rule or setting at a time and repeat the same test.</p>
+<h3 id="123-end-of-session-procedure">12.3 End-of-session procedure</h3>
+<ol>
+<li>Stop traffic generation and captures.</li>
+<li>Export selected events, queries, screenshots, and PCAPs; calculate hashes of evidence files.</li>
+<li>Record open issues, false positives, rule changes, and next steps.</li>
+<li>Stop Kali, then the target.</li>
+<li>Allow the sensor and forwarders to drain. Verify the last expected events arrived.</li>
+<li>Stop sensor and collector, then shut down Splunk and Wazuh cleanly using <code>sudo shutdown -h now</code>.</li>
+<li>Take consistent powered-off snapshots if preserving a new milestone. Snapshots are rollback points, not independent backups.</li>
+</ol>
+<h3 id="124-weekly-maintenance">12.4 Weekly maintenance</h3>
+<table>
+<thead>
+<tr>
+<th>Area</th>
+<th>Procedure</th>
+<th>Success check</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>OS updates</td>
+<td>Update with temporary NAT during a maintenance session; reboot as needed</td>
+<td>Network and service health tests pass</td>
+</tr>
+<tr>
+<td>Suricata rules</td>
+<td>Back up config/local rules; run <code>suricata-update</code>, configuration test, restart</td>
+<td>Both local signatures still fire</td>
+</tr>
+<tr>
+<td>Wazuh updates</td>
+<td>Review compatibility/release notes; back up; unhold and upgrade central components coherently before agents</td>
+<td>Agents reconnect; baseline exercises pass</td>
+</tr>
+<tr>
+<td>Splunk updates</td>
+<td>Back up app configs and follow selected release's supported upgrade path</td>
+<td>Ingestion, searches, and scheduled alerts pass</td>
+</tr>
+<tr>
+<td>Rotation</td>
+<td>Inspect new EVE and Wazuh alert files and effective permissions</td>
+<td>Forwarders read events after rotation</td>
+</tr>
+<tr>
+<td>Storage</td>
+<td>Review retention and growth on both SIEMs and sensor</td>
+<td>Free space remains above your chosen threshold</td>
+</tr>
+<tr>
+<td>Azure</td>
+<td>Inspect daily ingestion and charges</td>
+<td>Only intended sources/facilities arrive</td>
+</tr>
+</tbody>
+</table>
+<p>Run the Suricata update validation as separate steps:</p>
+<pre><code class="language-bash">sudo suricata-update
+sudo suricata -T -c /etc/suricata/suricata.yaml
+sudo systemctl restart suricata
+</code></pre>
+<p>Do not restart after a failed configuration test. Keep local rules outside the generated <code>suricata.rules</code> file.</p>
+<h3 id="125-backups-and-retention">12.5 Backups and retention</h3>
+<p>Back up these configuration locations securely:</p>
+<table>
+<thead>
+<tr>
+<th>Machine</th>
+<th>Configuration to preserve</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>All Linux VMs</td>
+<td>Netplan files, hostname/IP inventory, firewall rules</td>
+</tr>
+<tr>
+<td>Sensor</td>
+<td><code>/etc/suricata/</code>, Wazuh agent config, forwarder <code>soc_lab</code> app</td>
+</tr>
+<tr>
+<td>Wazuh</td>
+<td><code>/var/ossec/etc/</code>, required certificates/credentials, supported indexer backup if preserving history</td>
+</tr>
+<tr>
+<td>Splunk</td>
+<td><code>/opt/splunk/etc/apps/soc_lab/</code>, saved searches/dashboards, supported backup of wanted indexed data</td>
+</tr>
+<tr>
+<td>Collector</td>
+<td>rsyslog config and exported DCR/analytics definitions</td>
+</tr>
+</tbody>
+</table>
+<p>Agent keys and credentials are sensitive; a public Git repository is not an appropriate backup destination for them. Configuration backups alone do not preserve indexed history. Test one restore before depending on your backups.</p>
+<p>For local Suricata logs, inspect the package's existing logrotate configuration before adding another rotation policy. Maintain one owner for rotation, check disk use, and re-test forwarding after rotation. Avoid deleting active log files to free space. For Wazuh indexer history, use its supported index lifecycle/retention settings rather than removing index files from disk.</p>
+<h2 id="13-investigate-and-document-incidents">13. Investigate and document incidents</h2>
+<p>Use the same sequence for every alert:</p>
+<ol>
+<li><strong>Validate the alert:</strong> identify source tool, rule, time, endpoint, and raw event. Confirm that the rule means what its title implies.</li>
+<li><strong>Establish scope:</strong> resolve management and LAB addresses to assets; search the source and destination over a narrow window, then expand it if justified.</li>
+<li><strong>Build a timeline:</strong> compare network events, target authentication/access logs, and file events. Distinguish source-event time from ingestion time.</li>
+<li><strong>Verify with packets:</strong> where a PCAP exists, identify the actual request, connection, or scan. Record encryption and capture limitations.</li>
+<li><strong>Classify:</strong> authorized simulation, benign expected activity, detection false positive, or suspicious activity needing further investigation.</li>
+<li><strong>Contain if needed in the lab:</strong> disconnect the affected target's virtual adapters through the hypervisor. Preserve console access and evidence before reverting it.</li>
+<li><strong>Recover:</strong> restore known-good state, reconnect deliberately, and verify agents and the marker test again.</li>
+<li><strong>Improve detection:</strong> record a narrowly scoped rule change and compare its effect on the same exercise plus normal traffic.</li>
+</ol>
+<p>Use this case template in your notes:</p>
+<pre><code class="language-text">Case ID:
+Analyst / date:
+Exercise or suspected activity:
+UTC start and end:
+Source and destination / asset mapping:
+Rule IDs and descriptions:
+Expected result:
+Actual result at sensor / Wazuh / Splunk / Sentinel:
+Timeline:
+Evidence filenames and SHA-256 hashes:
+Queries used and time range:
+Assessment and confidence:
+Containment / recovery performed:
+Limitations or missing telemetry:
+Detection change and retest result:
+Closure classification:
+</code></pre>
+<p>Do not automatically block based on the lab SYN-burst rule. Automated response can disconnect agents or administrators and obscure the exercise. Introduce it later with a short timeout, a narrow target, and a tested recovery path.</p>
+<h2 id="14-troubleshooting">14. Troubleshooting</h2>
+<p>Work left to right through the pipeline. Fix the earliest failed checkpoint rather than changing several downstream settings at once.</p>
+<table>
+<thead>
+<tr>
+<th>Symptom</th>
+<th>Likely cause</th>
+<th>Check and corrective action</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Kali cannot reach target</td>
+<td>Wrong internal network name, interface address, or target firewall</td>
+<td>Check both VM adapter settings, <code>ip route</code>, target listener, and firewall</td>
+</tr>
+<tr>
+<td>Sensor sees ARP but no peer unicast</td>
+<td>No virtual-switch traffic copy</td>
+<td>Recheck sensor promiscuous policy; configure actual port mirroring or use target-local capture</td>
+</tr>
+<tr>
+<td>Suricata running, EVE empty</td>
+<td>Wrong service interface or no traffic</td>
+<td>Inspect systemd unit and <code>tcpdump</code> on the configured interface</td>
+</tr>
+<tr>
+<td>EVE contains HTTP but no marker alert</td>
+<td>Local rule not loaded or URI/IP mismatch</td>
+<td>Run <code>suricata -T</code>, inspect rule-files, and reproduce exact request</td>
+</tr>
+<tr>
+<td>Only some flows detected</td>
+<td>Asymmetric capture, drops, offload effects</td>
+<td>Inspect capture/stats; compare both directions in PCAP before changing offload settings</td>
+</tr>
+<tr>
+<td>Wazuh agent never active</td>
+<td>Enrollment blocked, duplicate identity, wrong manager, incompatible version</td>
+<td>Check 1514/1515 connectivity and endpoint <code>ossec.log</code></td>
+</tr>
+<tr>
+<td>Wazuh receives target logs but not EVE</td>
+<td>Wrong localfile location or permissions</td>
+<td>Inspect sensor agent config and use one EVE line in manager <code>wazuh-logtest</code></td>
+</tr>
+<tr>
+<td>Wazuh dashboard missing but manager runs</td>
+<td>Central stack incomplete or indexer/dashboard failure</td>
+<td>Check all four central services; manager alone does not provide UI</td>
+</tr>
+<tr>
+<td>File changes absent</td>
+<td>Directory missing during startup or baseline unfinished</td>
+<td>Create directory, restart agent, wait for scan, then modify again</td>
+</tr>
+<tr>
+<td>SSH failures absent</td>
+<td>Wrong auth source, collection duplicated/missing, password auth disabled</td>
+<td>Read target auth.log first and inspect effective SSH settings</td>
+</tr>
+<tr>
+<td>Splunk has no data</td>
+<td>Receiver/firewall/output/index/permissions error</td>
+<td>Test 9997, forward-server status, file read access, and both sides' splunkd.log</td>
+</tr>
+<tr>
+<td>Splunk fields absent</td>
+<td>Sourcetype differs from props stanza</td>
+<td>Check <code>sourcetype</code>, parsing app, and raw JSON; try <code>spath</code> diagnostically</td>
+</tr>
+<tr>
+<td>Splunk only shows events under All time</td>
+<td>Clock or timestamp parser problem</td>
+<td>Compare raw timestamp and <code>_time</code>; inspect TIME_PREFIX and system clocks</td>
+</tr>
+<tr>
+<td>Forwarding stops after midnight</td>
+<td>Rotated file not readable</td>
+<td>Check <code>getfacl</code>, parent traversal permissions, and current filename</td>
+</tr>
+<tr>
+<td>Events appear duplicated</td>
+<td>Overlapping inputs, archives re-read, both EVE and Wazuh counted</td>
+<td>List effective monitor stanzas; count sources separately</td>
+</tr>
+<tr>
+<td>Search works but alert does not</td>
+<td>Schedule, time window, permissions, or license</td>
+<td>Check alert execution history and trigger actions</td>
+</tr>
+<tr>
+<td>Sentinel has heartbeat but no syslog</td>
+<td>DCR/facility/receiver/AMA handoff issue</td>
+<td>Follow packet arrival → rsyslog → DCR association → workspace table</td>
+</tr>
+<tr>
+<td>Sentinel has syslog but no parsed Wazuh</td>
+<td>Non-JSON format or truncated payload</td>
+<td>Inspect complete <code>SyslogMessage</code>, compare original alert length and JSON</td>
+</tr>
+<tr>
+<td>Sentinel incident absent</td>
+<td>Query mismatch, scheduling delay, disabled rule, filtering threshold</td>
+<td>Run query manually on known marker and inspect rule status</td>
+</tr>
+<tr>
+<td>Services fail after restore</td>
+<td>Time jump, stale addresses, partial multi-VM restore</td>
+<td>Synchronize clocks, confirm identities and addressing, restart in dependency order</td>
+</tr>
+</tbody>
+</table>
+<p>Useful diagnostics, on the appropriate machine:</p>
+<pre><code class="language-bash">sudo journalctl -u suricata -n 100 --no-pager
+sudo journalctl -u wazuh-agent -n 100 --no-pager
+sudo tail -n 100 /var/ossec/logs/ossec.log
+sudo tail -n 100 /opt/splunkforwarder/var/log/splunk/splunkd.log
+sudo -u splunkfwd /opt/splunkforwarder/bin/splunk btool inputs list --debug
+sudo -u splunkfwd /opt/splunkforwarder/bin/splunk btool outputs list --debug
+sudo -u splunk /opt/splunk/bin/splunk btool props list --debug
+</code></pre>
+<p>Only run commands for software installed on that VM. Btool shows the effective file origin of settings, which helps identify a conflicting app configuration.</p>
+<h2 id="15-acceptance-checklist">15. Acceptance checklist</h2>
+<p>The core lab is ready when all core checks pass:</p>
+<ul class="contains-task-list">
+<li class="task-list-item"><input disabled="disabled" type="checkbox" /> Kali and target use the isolated LAB network, with temporary NAT disconnected for exercises.</li>
+<li class="task-list-item"><input disabled="disabled" type="checkbox" /> Host can administer designated MGMT addresses; Kali has no MGMT adapter.</li>
+<li class="task-list-item"><input disabled="disabled" type="checkbox" /> Sensor sees bidirectional Kali-to-target traffic.</li>
+<li class="task-list-item"><input disabled="disabled" type="checkbox" /> Wazuh central services are healthy and both agents are active.</li>
+<li class="task-list-item"><input disabled="disabled" type="checkbox" /> HTTP marker produces local Suricata signature <code>1000001</code>.</li>
+<li class="task-list-item"><input disabled="disabled" type="checkbox" /> Wazuh receives the matching alert.</li>
+<li class="task-list-item"><input disabled="disabled" type="checkbox" /> Splunk receives direct EVE records and Wazuh alerts in separate indexes.</li>
+<li class="task-list-item"><input disabled="disabled" type="checkbox" /> JSON fields and source timestamps are correct.</li>
+<li class="task-list-item"><input disabled="disabled" type="checkbox" /> Scheduled marker alert fires.</li>
+<li class="task-list-item"><input disabled="disabled" type="checkbox" /> Controlled SYN scan, failed SSH attempts, and file-change exercise produce the expected evidence or a documented explanation of any threshold limitation.</li>
+<li class="task-list-item"><input disabled="disabled" type="checkbox" /> A PCAP supports at least one network alert.</li>
+<li class="task-list-item"><input disabled="disabled" type="checkbox" /> New events still arrive after a log rotation and reboot.</li>
+<li class="task-list-item"><input disabled="disabled" type="checkbox" /> Configurations, versions, and at least one completed case are saved.</li>
+<li class="task-list-item"><input disabled="disabled" type="checkbox" /> Optional: Sentinel receives the marker, parses its Wazuh ID, and creates an incident.</li>
+<li class="task-list-item"><input disabled="disabled" type="checkbox" /> Optional: cloud ingestion and budget controls have been reviewed.</li>
+</ul>
+<h2 id="16-extensions">16. Extensions</h2>
+<p>After the baseline passes, add one capability at a time:</p>
+<ol>
+<li><strong>Windows endpoint:</strong> create a licensed/evaluation Windows VM, attach MGMT and LAB appropriately, install the Windows Wazuh agent using the dashboard's Windows command, verify Security/System/Application collection, and repeat a known event test. Never run the Linux apt command on Windows.</li>
+<li><strong>Windows process telemetry:</strong> add Sysmon using an explicitly reviewed configuration, collect <code>Microsoft-Windows-Sysmon/Operational</code>, and validate a benign process event before adding detection rules.</li>
+<li><strong>TLS for Splunk forwarding:</strong> deploy a trusted lab CA and certificates with correct identities, configure the SSL receiver and forwarder verification, then prove wrong certificates fail and valid forwarding works.</li>
+<li><strong>Detection tuning:</strong> replace broad thresholds with evidence-based conditions; test normal activity alongside each simulated case.</li>
+<li><strong>Packet replay:</strong> analyze known benign/training PCAPs with Suricata in an independent offline output directory. Label replay events and preserve original timestamps so they are not mistaken for live incidents.</li>
+<li><strong>Response automation:</strong> introduce one reversible Wazuh response with a short timeout and test its impact on connectivity.</li>
+</ol>
+<p>Keep the working baseline snapshot and a brief change log. A useful SOC lab is one where you can explain what happened, show the evidence, identify what was missed, and reproduce the result after a change.</p>
+<footer>Based on Amit29533/SOC-Home-Lab, expanded with vendor references and explicit validation checkpoints. Prepared 7 September 2026.</footer></main></body></html>
